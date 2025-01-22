@@ -6,6 +6,8 @@ import socket
 import pickle
 import numpy as np
 import time
+import json
+import struct
 
 print("Starting script...")
 
@@ -39,82 +41,74 @@ try:
     world = client.get_world()
     print("Connected to CARLA world")
 
-    # Set up socket server for ROS2 communication
+    # Setup TCP socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(('localhost', 12345))
+    server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    host_ip = '0.0.0.0'
+    port = 12345
+    server_socket.bind((host_ip, port))
     server_socket.listen(1)
-    print("Waiting for ROS2 client connection...")
-    
-    # Accept connection from ROS2 client
-    client_socket, addr = server_socket.accept()
-    print("Connected to ROS2 client at:", addr)
+    print("Waiting for connection on {}:{}".format(host_ip, port))
 
-    # Get spawn point
+    # Spawn vehicle
     spawn_points = world.get_map().get_spawn_points()
-    if not spawn_points:
-        raise RuntimeError("No spawn points found")
-
-    # Create vehicle
     blueprint = world.get_blueprint_library().find('vehicle.tesla.model3')
     vehicle = world.spawn_actor(blueprint, spawn_points[0])
     print("Vehicle spawned")
 
-    try:
-        # Make vehicle move forward
-        control = carla.VehicleControl()
-        control.throttle = 0.5
-        vehicle.apply_control(control)
-        print("Vehicle moving forward")
+    # Enable autopilot
+    vehicle.set_autopilot(True)
+    print("Autopilot enabled")
 
-        # Main loop - send vehicle data
+    # Set up basic autopilot parameters
+    settings = world.get_settings()
+    settings.synchronous_mode = True
+    world.apply_settings(settings)
+    print("World settings configured")
+
+    client_socket, addr = server_socket.accept()
+    print("Connected to: {}".format(addr))
+
+    try:
         while True:
             # Get vehicle data
-            location = vehicle.get_location()
-            rotation = vehicle.get_transform().rotation
+            transform = vehicle.get_transform()
             velocity = vehicle.get_velocity()
             
-            # Create data dictionary
-            data = {
-                'location': {
-                    'x': location.x,
-                    'y': location.y,
-                    'z': location.z
-                },
-                'rotation': {
-                    'pitch': rotation.pitch,
-                    'yaw': rotation.yaw,
-                    'roll': rotation.roll
-                },
-                'velocity': {
-                    'x': velocity.x,
-                    'y': velocity.y,
-                    'z': velocity.z
-                }
-            }
+            # Pack data efficiently (24 bytes total: 6 floats * 4 bytes)
+            data = struct.pack('!ffffff',
+                transform.location.x,
+                transform.location.y,
+                transform.location.z,
+                velocity.x,
+                velocity.y,
+                velocity.z
+            )
             
-            # Send data to ROS2
-            try:
-                client_socket.send(pickle.dumps(data))
-            except Exception as e:
-                print("Error sending data:", e)
-                break
-                
-            time.sleep(0.1)  # 10Hz update rate
+            # Send data size first (4 bytes for size)
+            size_data = struct.pack('!I', len(data))
+            client_socket.sendall(size_data + data)
+            
+            # Tick the world to advance simulation
+            world.tick()
+            time.sleep(0.01)  # 100Hz update rate
 
     except KeyboardInterrupt:
         print("Stopping...")
     
     finally:
-        # Clean up
         print("Cleaning up...")
+        settings.synchronous_mode = False
+        world.apply_settings(settings)
+        vehicle.set_autopilot(False)
         vehicle.destroy()
         client_socket.close()
         server_socket.close()
         print("Clean up complete")
 
 except Exception as e:
-    print("Error:", str(e))
+    print("Error: {}".format(str(e)))
     sys.exit(1)
 
 print("Script finished successfully")

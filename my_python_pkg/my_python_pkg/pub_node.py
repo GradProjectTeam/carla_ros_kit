@@ -3,94 +3,85 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PoseStamped, TwistStamped
 import socket
-import pickle
+import struct
 import time
 
-class CarlaLocationPublisher(Node):
+class CarlaSubscriber(Node):
     def __init__(self):
-        super().__init__('carla_location_publisher')
+        super().__init__('carla_subscriber')
         
-        # Create publishers
+        # Publishers
         self.pose_pub = self.create_publisher(PoseStamped, '/carla/vehicle/pose', 10)
         self.twist_pub = self.create_publisher(TwistStamped, '/carla/vehicle/twist', 10)
         
-        # Initialize socket connection
-        self.socket = None
-        self.connect_to_carla()
-        
-        # Create timer for receiving and publishing data
-        self.create_timer(0.1, self.timer_callback)  # 10Hz
-        
-        self.get_logger().info("Node initialized")
-
-    def connect_to_carla(self):
-        if self.socket:
-            self.socket.close()
-        
+        # Socket setup
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        connected = False
-        retry_count = 0
+        self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         
-        while not connected and retry_count < 5:
+        # Connect to CARLA
+        connected = False
+        while not connected:
             try:
-                self.get_logger().info("Attempting to connect to CARLA...")
                 self.socket.connect(('localhost', 12345))
                 connected = True
-                self.get_logger().info("Connected to CARLA successfully")
+                self.get_logger().info("Connected to CARLA")
             except ConnectionRefusedError:
-                retry_count += 1
-                self.get_logger().warn(f"Connection failed, retrying... ({retry_count}/5)")
-                time.sleep(2)
+                self.get_logger().warn("Connection failed, retrying in 1 second...")
+                time.sleep(1)
         
-        if not connected:
-            self.get_logger().error("Failed to connect to CARLA after 5 attempts")
-            return False
-        return True
+        self.create_timer(0.01, self.timer_callback)  # 100Hz
 
     def timer_callback(self):
-        if not self.socket:
-            if not self.connect_to_carla():
-                return
-        
         try:
-            # Receive data from CARLA
-            data = pickle.loads(self.socket.recv(4096))
+            # Read message size (4 bytes)
+            size_data = self.socket.recv(4)
+            if not size_data:
+                return
+            size = struct.unpack('!I', size_data)[0]
+            
+            # Read data (24 bytes: 6 floats)
+            data = self.socket.recv(size)
+            if len(data) != size:
+                return
+            
+            # Unpack the data
+            x, y, z, vx, vy, vz = struct.unpack('!ffffff', data)
             
             # Create and publish pose message
             pose_msg = PoseStamped()
             pose_msg.header.stamp = self.get_clock().now().to_msg()
             pose_msg.header.frame_id = "map"
-            pose_msg.pose.position.x = float(data['location']['x'])
-            pose_msg.pose.position.y = float(data['location']['y'])
-            pose_msg.pose.position.z = float(data['location']['z'])
+            pose_msg.pose.position.x = x
+            pose_msg.pose.position.y = y
+            pose_msg.pose.position.z = z
             self.pose_pub.publish(pose_msg)
             
             # Create and publish twist message
             twist_msg = TwistStamped()
             twist_msg.header.stamp = self.get_clock().now().to_msg()
             twist_msg.header.frame_id = "map"
-            twist_msg.twist.linear.x = float(data['velocity']['x'])
-            twist_msg.twist.linear.y = float(data['velocity']['y'])
-            twist_msg.twist.linear.z = float(data['velocity']['z'])
+            twist_msg.twist.linear.x = vx
+            twist_msg.twist.linear.y = vy
+            twist_msg.twist.linear.z = vz
             self.twist_pub.publish(twist_msg)
             
-            self.get_logger().debug(f"Published location: ({data['location']['x']:.2f}, {data['location']['y']:.2f}, {data['location']['z']:.2f})")
-            
         except Exception as e:
-            self.get_logger().error(f"Error in timer callback: {str(e)}")
-            self.socket = None
+            self.get_logger().error("Error in callback: {}".format(str(e)))
+            rclpy.shutdown()
+
+    def __del__(self):
+        if hasattr(self, 'socket'):
+            self.socket.close()
 
 def main():
     rclpy.init()
-    node = CarlaLocationPublisher()
+    node = CarlaSubscriber()
     
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        if node.socket:
-            node.socket.close()
         node.destroy_node()
         rclpy.shutdown()
 
