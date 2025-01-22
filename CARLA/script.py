@@ -10,13 +10,14 @@ import json
 import struct
 import math
 import random
+import asyncio
 
 print("Starting script...")
 print("Python version:", sys.version)
 
 try:
     # CARLA setup
-    carla_path = '/home/mostafa/GP/CARLA_0.9.5/PythonAPI/carla/dist'
+    carla_path = '/home/mostafa/ROS2andCarla/CARLA'
     print("Looking for CARLA at:", carla_path)
     carla_eggs = glob.glob('{0}/carla-*{1}.{2}-{3}.egg'.format(
         carla_path,
@@ -64,18 +65,172 @@ try:
             actor.destroy()
     print("Cleared existing vehicles")
 
-    # Setup TCP socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    host_ip = '0.0.0.0'
-    port = 12345
-    server_socket.bind((host_ip, port))
-    server_socket.listen(1)
-    print("Waiting for connection on {}:{}".format(host_ip, port))
+    # Setup sockets with better buffer sizes and options
+    def create_socket():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)  # 64KB buffer
+        return sock
 
-    # Initialize client socket as global
-    client_socket = None
+    lidar_socket = create_socket()
+    radar_socket = create_socket()
+    imu_socket = create_socket()
+
+    # Bind sockets
+    host_ip = '0.0.0.0'  # or '127.0.0.1' for local only
+    lidar_socket.bind((host_ip, 12345))
+    radar_socket.bind((host_ip, 12346))
+    imu_socket.bind((host_ip, 12347))
+
+    for sock in [lidar_socket, radar_socket, imu_socket]:
+        sock.listen(1)
+
+    print('Listening on {}:'.format(host_ip))
+    print('LIDAR: 12345\nRADAR: 12346\nIMU: 12347')
+
+    # Initialize client connections
+    lidar_client = None
+    radar_client = None
+    imu_client = None
+
+    # Accept connections before starting sensors
+    print("Waiting for client connections...")
+    try:
+        print("Waiting for LIDAR client...")
+        lidar_client, addr = lidar_socket.accept()
+        print("LIDAR client connected from {}".format(addr))
+        
+        print("Waiting for RADAR client...")
+        radar_client, addr = radar_socket.accept()
+        print("RADAR client connected from {}".format(addr))
+        
+        print("Waiting for IMU client...")
+        imu_client, addr = imu_socket.accept()
+        print("IMU client connected from {}".format(addr))
+        
+        print("All clients connected!")
+    except Exception as e:
+        print("Connection error: {}".format(e))
+        sys.exit(1)
+
+    # Pre-allocate numpy arrays for better performance
+    MAX_POINTS = 100000
+    points_buffer = np.zeros((MAX_POINTS, 4), dtype=np.float32)
+
+    def send_sensor_data(client, data_dict):
+        if not client:
+            return False
+        try:
+            # Pack data size and timestamp first
+            header = struct.pack('!II', data_dict['size'], data_dict['timestamp'])
+            client.sendall(header)
+            # Then send the actual data
+            client.sendall(data_dict['data'])
+            return True
+        except Exception as e:
+            print('Socket send error: {}'.format(e))
+            return False
+
+    def lidar_callback(point_cloud):
+        global lidar_client
+        if not lidar_client:
+            return
+
+        try:
+            # Process LIDAR data
+            raw_data = np.frombuffer(point_cloud.raw_data, dtype=np.float32)
+            points = raw_data.reshape(-1, 4)  # x, y, z, intensity
+            
+            # Pack data for sending
+            data = {
+                'size': len(points) * 16,  # 4 float32s per point
+                'timestamp': int(point_cloud.timestamp * 1000),  # ms
+                'data': points.tobytes()
+            }
+            
+            if not send_sensor_data(lidar_client, data):
+                print('LIDAR client disconnected')
+                lidar_client = None
+
+        except Exception as e:
+            print('LIDAR processing error: {}'.format(e))
+
+    def radar_callback(radar_data):
+        global radar_client
+        if not radar_client:
+            return
+
+        try:
+            # Process RADAR data
+            raw_data = np.frombuffer(radar_data.raw_data, dtype=np.float32)
+            points = raw_data.reshape(-1, 4)  # velocity, azimuth, altitude, depth
+            
+            # Pack data for sending
+            data = {
+                'size': len(points) * 16,
+                'timestamp': int(radar_data.timestamp * 1000),
+                'data': points.tobytes()
+            }
+            
+            if not send_sensor_data(radar_client, data):
+                print('RADAR client disconnected')
+                radar_client = None
+
+        except Exception as e:
+            print('RADAR processing error: {}'.format(e))
+
+    def imu_callback(imu_data):
+        global imu_client
+        if not imu_client:
+            return
+
+        try:
+            # Pack IMU data into array
+            imu_array = np.array([
+                imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z,
+                imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z,
+                imu_data.compass
+            ], dtype=np.float32)
+            
+            # Pack data for sending
+            data = {
+                'size': len(imu_array) * 4,  # float32 size
+                'timestamp': int(imu_data.timestamp * 1000),
+                'data': imu_array.tobytes()
+            }
+            
+            if not send_sensor_data(imu_client, data):
+                print('IMU client disconnected')
+                imu_client = None
+
+        except Exception as e:
+            print('IMU processing error: {}'.format(e))
+
+    # Add status printing
+    def print_status():
+        status = []
+        if lidar_client:
+            status.append('LIDAR connected')
+        if radar_client:
+            status.append('RADAR connected')
+        if imu_client:
+            status.append('IMU connected')
+        print('\rActive connections: {}'.format(' | '.join(status)), end='')
+
+    async def handle_connections():
+        global lidar_client, radar_client, imu_client
+        while True:
+            if not lidar_client:
+                lidar_client, _ = await lidar_socket.accept()
+                print('LIDAR client connected')
+            if not radar_client:
+                radar_client, _ = await radar_socket.accept()
+                print('RADAR client connected')
+            if not imu_client:
+                imu_client, _ = await imu_socket.accept()
+                print('IMU client connected')
+            await asyncio.sleep(0.1)
 
     # Get spawn points
     spawn_points = world.get_map().get_spawn_points()
@@ -97,12 +252,12 @@ try:
     # Add LIDAR sensor with updated configuration
     lidar_bp = blueprint_library.find('sensor.lidar.ray_cast')
     lidar_bp.set_attribute('channels', '32')  # Standard number of channels
-    lidar_bp.set_attribute('points_per_second', '100000')  # Reduced for stability
-    lidar_bp.set_attribute('rotation_frequency', '10')  # Standard rotation speed
-    lidar_bp.set_attribute('range', '2000')  # Reduced range for testing
-    lidar_bp.set_attribute('upper_fov', '10.0')  # Reduced upper FOV
-    lidar_bp.set_attribute('lower_fov', '-30.0')  # Standard lower FOV
-    
+    lidar_bp.set_attribute('points_per_second', '10000')  # Reduced for stability
+    lidar_bp.set_attribute('rotation_frequency', '50')  # Standard rotation speed
+    lidar_bp.set_attribute('range', '500.0')  # Reduced range for testing
+    lidar_bp.set_attribute('upper_fov', '0.0')  # Reduced upper FOV
+    lidar_bp.set_attribute('lower_fov', '-20.0')  # Standard lower FOV
+
     # Print LIDAR configuration
     print("\nLIDAR Configuration:")
     print("- Channels:", lidar_bp.get_attribute('channels').as_int())
@@ -125,106 +280,115 @@ try:
     # Enable autopilot
     vehicle.set_autopilot(True)
     print("Autopilot enabled")
-
+    # throttle = 0.5
+    # vehicle.apply_control(carla.VehicleControl(throttle=throttle))
     # Set up basic autopilot parameters
     settings = world.get_settings()
     settings.synchronous_mode = True
     world.apply_settings(settings)
     print("World settings configured")
 
-    def wait_for_connection():
-        global client_socket
-        while True:
-            try:
-                print("\nWaiting for ROS node connection...")
-                client_socket, addr = server_socket.accept()
-                print("Connected to:", addr)
-                return
-            except Exception as e:
-                print("Connection failed:", str(e))
-                print("Retrying in 2 seconds...")
-                time.sleep(2)
-
-    def lidar_callback(point_cloud):
-        global client_socket
-        try:
-            # Get raw data and ensure it's properly aligned
-            raw_data = np.frombuffer(point_cloud.raw_data, dtype=np.float32)
-            
-            # Ensure the data size is divisible by 4
-            num_points = len(raw_data) // 4
-            points = raw_data[:num_points * 4].reshape((num_points, 4))
-            
-            if len(points) > 0:
-                # Calculate distances for each point
-                distances = np.sqrt(np.sum(points[:, :3]**2, axis=1))
-                
-                # Print basic stats
-                print("\rPoints: {} | Raw size: {} | Max dist: {:.1f}m | Avg dist: {:.1f}m".format(
-                    len(points),
-                    len(raw_data),
-                    np.max(distances),
-                    np.mean(distances)
-                ), end='')
-            
-                # Send data to ROS with error handling
-                try:
-                    if client_socket is None or client_socket.fileno() == -1:
-                        wait_for_connection()
-                    
-                    header = struct.pack('!I', num_points)
-                    points_data = np.ascontiguousarray(points, dtype=np.float32).tobytes()
-                    client_socket.sendall(header + points_data)
-                except (BrokenPipeError, ConnectionResetError, OSError) as e:
-                    print("\nConnection lost:", str(e))
-                    if client_socket:
-                        client_socket.close()
-                    client_socket = None
-                    wait_for_connection()
-            
-        except Exception as e:
-            print("\nError in LIDAR callback:", str(e))
-            if 'raw_data' in locals():
-                print("Raw data shape:", raw_data.shape)
-                print("Raw data size:", raw_data.size)
-            if 'points' in locals():
-                print("Points shape:", points.shape)
-
-    # Register LIDAR callback
-    lidar.listen(lidar_callback)
-    print("LIDAR callback registered")
-    print("\nVisualization available in RViz2. Use the following commands in separate terminals:")
-    print("1. ros2 run my_python_pkg pub_node")
-    print("2. rviz2")
-    print("\nIn RViz2:")
-    print("- Set Fixed Frame to 'lidar_link'")
-    print("- Add PointCloud2 display")
-    print("- Set Topic to '/carla/lidar'")
-
-    # Initial connection
-    wait_for_connection()
-
+    # Initialize sensors with more conservative settings
     try:
+        # IMU with lower update rate
+        imu_bp = blueprint_library.find('sensor.other.imu')
+        imu_bp.set_attribute('sensor_tick', '0.1')  # 10Hz
+        imu_location = carla.Transform(carla.Location(x=0.0, y=0.0, z=0.0))
+        imu = world.spawn_actor(imu_bp, imu_location, attach_to=vehicle)
+        actor_list.append(imu)
+        print("IMU sensor added")
+
+        # RADAR with conservative settings
+        radar_bp = blueprint_library.find('sensor.other.radar')
+        radar_bp.set_attribute('horizontal_fov', '30')
+        radar_bp.set_attribute('vertical_fov', '10')
+        radar_bp.set_attribute('range', '50')
+        radar_bp.set_attribute('sensor_tick', '0.1')  # 10Hz
+        radar_location = carla.Transform(carla.Location(x=2.0, z=1.0))
+        radar = world.spawn_actor(radar_bp, radar_location, attach_to=vehicle)
+        actor_list.append(radar)
+        print("RADAR sensor added")
+
+        # Wait for sensors to initialize
+        time.sleep(0.5)
+
+        # Configure world settings first
+        settings = world.get_settings()
+        settings.synchronous_mode = True
+        settings.fixed_delta_seconds = 0.01  # 100 FPS
+        world.apply_settings(settings)
+        print('World settings configured with fixed_delta_seconds = {}'.format(
+            settings.fixed_delta_seconds))
+
+        # Register callbacks after world configuration
+        imu.listen(imu_callback)
+        radar.listen(radar_callback)
+        lidar.listen(lidar_callback)
+        print("Sensor callbacks registered")
+
+        # Main loop with status updates
+        print('Starting main loop...')
         while True:
             world.tick()
-            time.sleep(0.1)  # 10 FPS
+            print_status()
+            time.sleep(0.01)  # Match fixed_delta_seconds
 
     except KeyboardInterrupt:
-        print("\nStopping...")
-    
+        print('\nStopping...')
+    except Exception as e:
+        print('Setup error: {}'.format(e))
     finally:
-        print("Cleaning up...")
-        settings.synchronous_mode = False
-        world.apply_settings(settings)
-        
-        print("Destroying actors...")
-        for actor in actor_list:
-            actor.destroy()
-        
-        if 'client_socket' in globals():
-            client_socket.close()
-        server_socket.close()
-        print("Clean up complete")
+        print('Cleaning up...')
+        try:
+            # Restore original settings
+            settings = world.get_settings()
+            settings.synchronous_mode = False
+            settings.fixed_delta_seconds = None
+            world.apply_settings(settings)
+            
+            # Stop sensors first
+            print('Stopping sensors...')
+            for sensor in [lidar, radar, imu]:
+                if sensor:
+                    try:
+                        sensor.stop()
+                    except:
+                        pass
+            
+            # Wait for sensors to stop
+            time.sleep(0.5)
+            
+            # Destroy sensors
+            print('Destroying sensors...')
+            for sensor in [lidar, radar, imu]:
+                if sensor:
+                    try:
+                        sensor.destroy()
+                    except:
+                        pass
+                        
+            # Close sockets
+            print('Closing sockets...')
+            for sock in [lidar_client, radar_client, imu_client, 
+                        lidar_socket, radar_socket, imu_socket]:
+                if sock:
+                    try:
+                        sock.close()
+                    except:
+                        pass
+                        
+            # Clean up remaining actors
+            print('Destroying remaining actors...')
+            for actor in actor_list:
+                try:
+                    actor.destroy()
+                except:
+                    pass
+                    
+            print('Cleanup complete')
+            
+        except Exception as e:
+            print('Error during cleanup: {}'.format(e))
 
 except ImportError as e:
     print("Import Error:", str(e))
@@ -243,7 +407,7 @@ def start_server():
     
     # Use localhost instead of hostname for better compatibility
     host = 'localhost'
-    port = 12345
+    port = 12343
     
     try:
         print("Binding server to {}:{}".format(host, port))

@@ -10,6 +10,7 @@ setup.py
 ../build/my_python_pkg/my_python_pkg.egg-info/zip-safe
 my_python_pkg/__init__.py
 my_python_pkg/pub_node.py
+my_python_pkg/sensor_reader_node.py
 resource/my_python_pkg
 test/test_copyright.py
 test/test_flake8.py
