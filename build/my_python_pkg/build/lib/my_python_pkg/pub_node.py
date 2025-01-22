@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import PoseStamped, TwistStamped
+from sensor_msgs.msg import Imu
+from geometry_msgs.msg import Vector3
 import socket
 import struct
 import time
 
-class CarlaSubscriber(Node):
+class CarlaIMUSubscriber(Node):
     def __init__(self):
-        super().__init__('carla_subscriber')
+        super().__init__('carla_imu_subscriber')
         
-        # Publishers
-        self.pose_pub = self.create_publisher(PoseStamped, '/carla/vehicle/pose', 10)
-        self.twist_pub = self.create_publisher(TwistStamped, '/carla/vehicle/twist', 10)
+        # Publisher
+        self.imu_pub = self.create_publisher(Imu, '/carla/vehicle/imu', 10)
         
         # Socket setup
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -44,26 +44,29 @@ class CarlaSubscriber(Node):
             if len(data) != size:
                 return
             
-            # Unpack the data
-            x, y, z, vx, vy, vz = struct.unpack('!ffffff', data)
+            # Unpack IMU data
+            ax, ay, az, gx, gy, gz = struct.unpack('!ffffff', data)
             
-            # Create and publish pose message
-            pose_msg = PoseStamped()
-            pose_msg.header.stamp = self.get_clock().now().to_msg()
-            pose_msg.header.frame_id = "map"
-            pose_msg.pose.position.x = x
-            pose_msg.pose.position.y = y
-            pose_msg.pose.position.z = z
-            self.pose_pub.publish(pose_msg)
+            # Create IMU message
+            imu_msg = Imu()
+            imu_msg.header.stamp = self.get_clock().now().to_msg()
+            imu_msg.header.frame_id = "imu_link"
             
-            # Create and publish twist message
-            twist_msg = TwistStamped()
-            twist_msg.header.stamp = self.get_clock().now().to_msg()
-            twist_msg.header.frame_id = "map"
-            twist_msg.twist.linear.x = vx
-            twist_msg.twist.linear.y = vy
-            twist_msg.twist.linear.z = vz
-            self.twist_pub.publish(twist_msg)
+            # Set linear acceleration
+            imu_msg.linear_acceleration.x = ax
+            imu_msg.linear_acceleration.y = ay
+            imu_msg.linear_acceleration.z = az
+            
+            # Set angular velocity
+            imu_msg.angular_velocity.x = gx
+            imu_msg.angular_velocity.y = gy
+            imu_msg.angular_velocity.z = gz
+            
+            # Set orientation covariance to -1 to indicate no orientation data
+            imu_msg.orientation_covariance[0] = -1
+            
+            # Publish IMU data
+            self.imu_pub.publish(imu_msg)
             
         except Exception as e:
             self.get_logger().error("Error in callback: {}".format(str(e)))
@@ -75,7 +78,7 @@ class CarlaSubscriber(Node):
 
 def main():
     rclpy.init()
-    node = CarlaSubscriber()
+    node = CarlaIMUSubscriber()
     
     try:
         rclpy.spin(node)

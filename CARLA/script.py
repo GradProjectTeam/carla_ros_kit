@@ -8,6 +8,8 @@ import numpy as np
 import time
 import json
 import struct
+import math
+import random
 
 print("Starting script...")
 
@@ -41,6 +43,12 @@ try:
     world = client.get_world()
     print("Connected to CARLA world")
 
+    # Clear all existing vehicles
+    for actor in world.get_actors():
+        if 'vehicle' in actor.type_id:
+            actor.destroy()
+    print("Cleared existing vehicles")
+
     # Setup TCP socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -51,11 +59,17 @@ try:
     server_socket.listen(1)
     print("Waiting for connection on {}:{}".format(host_ip, port))
 
-    # Spawn vehicle
+    # Get spawn points
     spawn_points = world.get_map().get_spawn_points()
+    
+    # Use the first spawn point (fixed position)
+    spawn_point = spawn_points[0]
+    # Adjust height to avoid collision
+    spawn_point.location.z += 0.5  # Raise slightly off the ground
+    
     blueprint = world.get_blueprint_library().find('vehicle.tesla.model3')
-    vehicle = world.spawn_actor(blueprint, spawn_points[0])
-    print("Vehicle spawned")
+    vehicle = world.spawn_actor(blueprint, spawn_point)
+    print("Vehicle spawned at fixed position:", spawn_point.location)
 
     # Enable autopilot
     vehicle.set_autopilot(True)
@@ -73,17 +87,15 @@ try:
     try:
         while True:
             # Get vehicle data
-            transform = vehicle.get_transform()
-            velocity = vehicle.get_velocity()
+            acceleration = vehicle.get_acceleration()
+            angular_velocity = vehicle.get_angular_velocity()
             
-            # Pack data efficiently (24 bytes total: 6 floats * 4 bytes)
+            # Pack data (6 floats: 3 for acceleration, 3 for angular velocity)
             data = struct.pack('!ffffff',
-                transform.location.x,
-                transform.location.y,
-                transform.location.z,
-                velocity.x,
-                velocity.y,
-                velocity.z
+                acceleration.x, acceleration.y, acceleration.z,
+                math.radians(angular_velocity.x),
+                math.radians(angular_velocity.y),
+                math.radians(angular_velocity.z)
             )
             
             # Send data size first (4 bytes for size)
