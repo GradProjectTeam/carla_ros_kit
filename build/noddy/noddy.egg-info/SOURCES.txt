@@ -1,0 +1,10 @@
+noddy.c
+noddy2.c
+noddy3.c
+noddy4.c
+setup.py
+shoddy.c
+../../../../build/noddy/noddy.egg-info/PKG-INFO
+../../../../build/noddy/noddy.egg-info/SOURCES.txt
+../../../../build/noddy/noddy.egg-info/dependency_links.txt
+../../../../build/noddy/noddy.egg-info/top_level.txt

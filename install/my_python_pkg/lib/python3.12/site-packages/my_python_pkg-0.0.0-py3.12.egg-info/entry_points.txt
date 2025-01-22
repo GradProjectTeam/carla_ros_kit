@@ -1,0 +1,2 @@
+[console_scripts]
+pub_node = my_python_pkg.pub_node:main

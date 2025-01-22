@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: test2to3
+Version: 1.0
+Summary: 2to3 distutils test package
+Author: Martin v. Löwis
+Author-email: python-dev@python.org
+License: PSF license

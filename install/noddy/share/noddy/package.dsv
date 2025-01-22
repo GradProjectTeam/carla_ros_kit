@@ -1,0 +1,3 @@
+source;share/noddy/hook/pythonpath.ps1
+source;share/noddy/hook/pythonpath.dsv
+source;share/noddy/hook/pythonpath.sh

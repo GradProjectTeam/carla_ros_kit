@@ -1,0 +1,17 @@
+/usr/lib/python3/dist-packages/setuptools/command/sdist.py:126: SetuptoolsDeprecationWarning: `build_py` command does not inherit from setuptools' `build_py`.
+!!
+
+        ********************************************************************************
+        Custom 'build_py' does not implement 'get_data_files_without_manifest'.
+        Please extend command classes from setuptools instead of distutils.
+
+        See https://peps.python.org/pep-0632/ for details.
+        ********************************************************************************
+
+!!
+  self._add_data_files(self._safe_data_files(build_py))
+  File "/home/mostafa/ROS2andCarla/install/test2to3/lib/python3.12/site-packages/test2to3/hello.py", line 3
+    print "Hello, world"
+    ^^^^^^^^^^^^^^^^^^^^
+SyntaxError: Missing parentheses in call to 'print'. Did you mean print(...)?
+

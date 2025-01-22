@@ -1,0 +1,10 @@
+README
+maintest.py
+setup.py
+../../../../build/test2to3/test2to3.egg-info/PKG-INFO
+../../../../build/test2to3/test2to3.egg-info/SOURCES.txt
+../../../../build/test2to3/test2to3.egg-info/dependency_links.txt
+../../../../build/test2to3/test2to3.egg-info/top_level.txt
+test/test_foo.py
+test2to3/__init__.py
+test2to3/hello.py

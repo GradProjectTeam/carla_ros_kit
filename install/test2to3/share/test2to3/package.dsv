@@ -1,0 +1,9 @@
+source;share/test2to3/hook/path.ps1
+source;share/test2to3/hook/path.dsv
+source;share/test2to3/hook/path.sh
+source;share/test2to3/hook/pythonpath.ps1
+source;share/test2to3/hook/pythonpath.dsv
+source;share/test2to3/hook/pythonpath.sh
+source;share/test2to3/hook/pythonscriptspath.ps1
+source;share/test2to3/hook/pythonscriptspath.dsv
+source;share/test2to3/hook/pythonscriptspath.sh
