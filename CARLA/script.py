@@ -12,36 +12,51 @@ import math
 import random
 
 print("Starting script...")
+print("Python version:", sys.version)
 
 try:
-    # Print Python version info
-    print("Python version:", sys.version)
-    
     # CARLA setup
     carla_path = '/home/mostafa/GP/CARLA_0.9.5/PythonAPI/carla/dist'
     print("Looking for CARLA at:", carla_path)
-    
     carla_eggs = glob.glob('{0}/carla-*{1}.{2}-{3}.egg'.format(
         carla_path,
         sys.version_info.major,
         sys.version_info.minor,
         "win-amd64" if os.name == "nt" else "linux-x86_64"
     ))
-    
-    if not carla_eggs:
-        raise RuntimeError("No CARLA egg files found")
-    
-    print("Found CARLA egg:", carla_eggs[0])
     sys.path.append(carla_eggs[0])
+    print("Found CARLA egg:", carla_eggs[0])
     
     import carla
     print("CARLA imported successfully")
+
+    # Try importing required packages
+    print("Checking required packages...")
+    
+    print("Importing numpy...")
+    import numpy as np
+    print("Numpy version:", np.__version__)
+    
+    print("Importing socket...")
+    import socket
+    
+    print("Importing struct...")
+    import struct
+    
+   
+    print("All imports successful!")
+    
+    # Initialize Pygame
+   
 
     # Connect to CARLA
     client = carla.Client('localhost', 2000)
     client.set_timeout(2.0)
     world = client.get_world()
     print("Connected to CARLA world")
+
+    # Initialize actor list
+    actor_list = []
 
     # Clear all existing vehicles
     for actor in world.get_actors():
@@ -59,17 +74,53 @@ try:
     server_socket.listen(1)
     print("Waiting for connection on {}:{}".format(host_ip, port))
 
+    # Initialize client socket as global
+    client_socket = None
+
     # Get spawn points
     spawn_points = world.get_map().get_spawn_points()
-    
-    # Use the first spawn point (fixed position)
     spawn_point = spawn_points[0]
-    # Adjust height to avoid collision
-    spawn_point.location.z += 0.5  # Raise slightly off the ground
+    spawn_point.location.z += 0.5
     
-    blueprint = world.get_blueprint_library().find('vehicle.tesla.model3')
-    vehicle = world.spawn_actor(blueprint, spawn_point)
-    print("Vehicle spawned at fixed position:", spawn_point.location)
+    # Spawn vehicle
+    blueprint_library = world.get_blueprint_library()
+    vehicle_bp = blueprint_library.find('vehicle.tesla.model3')
+    vehicle = world.spawn_actor(vehicle_bp, spawn_point)
+    actor_list.append(vehicle)
+    print("\nVehicle spawned successfully")
+    print("Vehicle location: x={:.2f}, y={:.2f}, z={:.2f}".format(
+        vehicle.get_location().x,
+        vehicle.get_location().y,
+        vehicle.get_location().z
+    ))
+
+    # Add LIDAR sensor with updated configuration
+    lidar_bp = blueprint_library.find('sensor.lidar.ray_cast')
+    lidar_bp.set_attribute('channels', '32')  # Standard number of channels
+    lidar_bp.set_attribute('points_per_second', '100000')  # Reduced for stability
+    lidar_bp.set_attribute('rotation_frequency', '10')  # Standard rotation speed
+    lidar_bp.set_attribute('range', '2000')  # Reduced range for testing
+    lidar_bp.set_attribute('upper_fov', '10.0')  # Reduced upper FOV
+    lidar_bp.set_attribute('lower_fov', '-30.0')  # Standard lower FOV
+    
+    # Print LIDAR configuration
+    print("\nLIDAR Configuration:")
+    print("- Channels:", lidar_bp.get_attribute('channels').as_int())
+    print("- Points per second:", lidar_bp.get_attribute('points_per_second').as_int())
+    print("- Range:", lidar_bp.get_attribute('range').as_float(), "meters")
+    print("- Upper FOV:", lidar_bp.get_attribute('upper_fov').as_float(), "degrees")
+    print("- Lower FOV:", lidar_bp.get_attribute('lower_fov').as_float(), "degrees")
+    print("- Rotation frequency:", lidar_bp.get_attribute('rotation_frequency').as_float(), "Hz")
+    print("- Horizontal FOV: 360 degrees (fixed)")
+
+    # Spawn LIDAR with adjusted position (moved forward and up for better visibility)
+    lidar_location = carla.Transform(
+        carla.Location(x=1.5, z=2.0),  # Moved forward and up
+        carla.Rotation(pitch=0.0)  # Ensure LIDAR is level
+    )
+    lidar = world.spawn_actor(lidar_bp, lidar_location, attach_to=vehicle)
+    actor_list.append(lidar)
+    print("\nLIDAR sensor added at position: x=1.5m, z=2.0m")
 
     # Enable autopilot
     vehicle.set_autopilot(True)
@@ -81,44 +132,104 @@ try:
     world.apply_settings(settings)
     print("World settings configured")
 
-    client_socket, addr = server_socket.accept()
-    print("Connected to: {}".format(addr))
+    def wait_for_connection():
+        global client_socket
+        while True:
+            try:
+                print("\nWaiting for ROS node connection...")
+                client_socket, addr = server_socket.accept()
+                print("Connected to:", addr)
+                return
+            except Exception as e:
+                print("Connection failed:", str(e))
+                print("Retrying in 2 seconds...")
+                time.sleep(2)
+
+    def lidar_callback(point_cloud):
+        global client_socket
+        try:
+            # Get raw data and ensure it's properly aligned
+            raw_data = np.frombuffer(point_cloud.raw_data, dtype=np.float32)
+            
+            # Ensure the data size is divisible by 4
+            num_points = len(raw_data) // 4
+            points = raw_data[:num_points * 4].reshape((num_points, 4))
+            
+            if len(points) > 0:
+                # Calculate distances for each point
+                distances = np.sqrt(np.sum(points[:, :3]**2, axis=1))
+                
+                # Print basic stats
+                print("\rPoints: {} | Raw size: {} | Max dist: {:.1f}m | Avg dist: {:.1f}m".format(
+                    len(points),
+                    len(raw_data),
+                    np.max(distances),
+                    np.mean(distances)
+                ), end='')
+            
+                # Send data to ROS with error handling
+                try:
+                    if client_socket is None or client_socket.fileno() == -1:
+                        wait_for_connection()
+                    
+                    header = struct.pack('!I', num_points)
+                    points_data = np.ascontiguousarray(points, dtype=np.float32).tobytes()
+                    client_socket.sendall(header + points_data)
+                except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                    print("\nConnection lost:", str(e))
+                    if client_socket:
+                        client_socket.close()
+                    client_socket = None
+                    wait_for_connection()
+            
+        except Exception as e:
+            print("\nError in LIDAR callback:", str(e))
+            if 'raw_data' in locals():
+                print("Raw data shape:", raw_data.shape)
+                print("Raw data size:", raw_data.size)
+            if 'points' in locals():
+                print("Points shape:", points.shape)
+
+    # Register LIDAR callback
+    lidar.listen(lidar_callback)
+    print("LIDAR callback registered")
+    print("\nVisualization available in RViz2. Use the following commands in separate terminals:")
+    print("1. ros2 run my_python_pkg pub_node")
+    print("2. rviz2")
+    print("\nIn RViz2:")
+    print("- Set Fixed Frame to 'lidar_link'")
+    print("- Add PointCloud2 display")
+    print("- Set Topic to '/carla/lidar'")
+
+    # Initial connection
+    wait_for_connection()
 
     try:
         while True:
-            # Get vehicle data
-            acceleration = vehicle.get_acceleration()
-            angular_velocity = vehicle.get_angular_velocity()
-            
-            # Pack data (6 floats: 3 for acceleration, 3 for angular velocity)
-            data = struct.pack('!ffffff',
-                acceleration.x, acceleration.y, acceleration.z,
-                math.radians(angular_velocity.x),
-                math.radians(angular_velocity.y),
-                math.radians(angular_velocity.z)
-            )
-            
-            # Send data size first (4 bytes for size)
-            size_data = struct.pack('!I', len(data))
-            client_socket.sendall(size_data + data)
-            
-            # Tick the world to advance simulation
             world.tick()
-            time.sleep(0.01)  # 100Hz update rate
+            time.sleep(0.1)  # 10 FPS
 
     except KeyboardInterrupt:
-        print("Stopping...")
+        print("\nStopping...")
     
     finally:
         print("Cleaning up...")
         settings.synchronous_mode = False
         world.apply_settings(settings)
-        vehicle.set_autopilot(False)
-        vehicle.destroy()
-        client_socket.close()
+        
+        print("Destroying actors...")
+        for actor in actor_list:
+            actor.destroy()
+        
+        if 'client_socket' in globals():
+            client_socket.close()
         server_socket.close()
         print("Clean up complete")
 
+except ImportError as e:
+    print("Import Error:", str(e))
+    print("Please install the missing package")
+    sys.exit(1)
 except Exception as e:
     print("Error: {}".format(str(e)))
     sys.exit(1)

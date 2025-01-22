@@ -1,92 +1,100 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import Imu
-from geometry_msgs.msg import Vector3
+from sensor_msgs.msg import PointCloud2, PointField
 import socket
 import struct
+import numpy as np
 import time
 
-class CarlaIMUSubscriber(Node):
+class CarlaLidarPublisher(Node):
     def __init__(self):
-        super().__init__('carla_imu_subscriber')
+        super().__init__('carla_lidar_publisher')
         
-        # Publisher
-        self.imu_pub = self.create_publisher(Imu, '/carla/vehicle/imu', 10)
+        # Create publisher
+        self.publisher = self.create_publisher(PointCloud2, '/carla/lidar', 10)
         
         # Socket setup
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        server_address = ('localhost', 12345)
         
-        # Connect to CARLA
-        connected = False
-        while not connected:
-            try:
-                self.socket.connect(('localhost', 12345))
-                connected = True
-                self.get_logger().info("Connected to CARLA")
-            except ConnectionRefusedError:
-                self.get_logger().warn("Connection failed, retrying in 1 second...")
-                time.sleep(1)
-        
-        self.create_timer(0.01, self.timer_callback)  # 100Hz
+        # Connect to CARLA script
+        try:
+            self.socket.connect(server_address)
+            self.get_logger().info(f'Connected to {server_address}')
+            
+            # Create timer for receiving data
+            self.timer = self.create_timer(0.1, self.timer_callback)
+            
+        except Exception as e:
+            self.get_logger().error(f'Failed to connect: {str(e)}')
+            raise e
 
     def timer_callback(self):
         try:
-            # Read message size (4 bytes)
-            size_data = self.socket.recv(4)
-            if not size_data:
+            # Read header (number of points)
+            header_data = self.socket.recv(4)
+            if not header_data:
+                self.get_logger().error('No data received')
                 return
-            size = struct.unpack('!I', size_data)[0]
+                
+            num_points = struct.unpack('!I', header_data)[0]
             
-            # Read data (24 bytes: 6 floats)
-            data = self.socket.recv(size)
-            if len(data) != size:
+            # Read point cloud data
+            data_size = num_points * 16  # 4 float32 values per point
+            point_data = self.socket.recv(data_size)
+            
+            if len(point_data) != data_size:
+                self.get_logger().error(f'Incomplete data received: {len(point_data)} != {data_size}')
                 return
             
-            # Unpack IMU data
-            ax, ay, az, gx, gy, gz = struct.unpack('!ffffff', data)
+            # Convert to numpy array
+            points = np.frombuffer(point_data, dtype=np.float32).reshape((num_points, 4))
             
-            # Create IMU message
-            imu_msg = Imu()
-            imu_msg.header.stamp = self.get_clock().now().to_msg()
-            imu_msg.header.frame_id = "imu_link"
+            # Create PointCloud2 message
+            msg = PointCloud2()
+            msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = 'lidar_link'
             
-            # Set linear acceleration
-            imu_msg.linear_acceleration.x = ax
-            imu_msg.linear_acceleration.y = ay
-            imu_msg.linear_acceleration.z = az
+            msg.height = 1
+            msg.width = num_points
             
-            # Set angular velocity
-            imu_msg.angular_velocity.x = gx
-            imu_msg.angular_velocity.y = gy
-            imu_msg.angular_velocity.z = gz
+            msg.fields = [
+                PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name='intensity', offset=12, datatype=PointField.FLOAT32, count=1)
+            ]
             
-            # Set orientation covariance to -1 to indicate no orientation data
-            imu_msg.orientation_covariance[0] = -1
+            msg.is_bigendian = False
+            msg.point_step = 16
+            msg.row_step = msg.point_step * num_points
+            msg.is_dense = True
+            msg.data = point_data
             
-            # Publish IMU data
-            self.imu_pub.publish(imu_msg)
+            # Publish message
+            self.publisher.publish(msg)
+            self.get_logger().info(f'Published {num_points} points')
             
         except Exception as e:
-            self.get_logger().error("Error in callback: {}".format(str(e)))
-            rclpy.shutdown()
+            self.get_logger().error(f'Error in callback: {str(e)}')
+            if not rclpy.ok():
+                raise e
 
     def __del__(self):
         if hasattr(self, 'socket'):
             self.socket.close()
 
-def main():
-    rclpy.init()
-    node = CarlaIMUSubscriber()
-    
+def main(args=None):
     try:
+        rclpy.init(args=args)
+        node = CarlaLidarPublisher()
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
+    except Exception as e:
+        print(f"Error: {str(e)}")
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
