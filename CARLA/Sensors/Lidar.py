@@ -16,7 +16,7 @@ print("Python version:", sys.version)
 
 try:
     # CARLA setup
-    carla_path = '/home/mostafa/ROS2andCarla/CARLA'
+    carla_path = '../'
     print("Looking for CARLA at:", carla_path)
     carla_eggs = glob.glob('{0}/carla-*{1}.{2}-{3}.egg'.format(
         carla_path,

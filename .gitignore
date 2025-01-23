@@ -16,10 +16,15 @@
 # Don't ignore .gitignore
 !.gitignore
 
+# Don't ignore readme.md
+!readme.md
+
 # In CARLA directory, keep Python scripts and Sensors
 CARLA/*
 !CARLA/*.py
 !CARLA/Sensors/
+!CARLA/scripts/
+!CARLA/scripts/*.py
 !CARLA/Sensors/*.py
 
 # Still ignore Python cache files

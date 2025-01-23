@@ -1,3 +1,4 @@
 [console_scripts]
+imu_processor_node = my_python_pkg.imu_processor_node:main
 lidar_processor_node = my_python_pkg.lidar_processor_node:main
 pub_node = my_python_pkg.pub_node:main
