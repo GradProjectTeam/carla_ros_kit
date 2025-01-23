@@ -39,3 +39,23 @@ AdditionalMaps_0.9.8.tar.gz
 carla-0.9.8-py3.5-linux-x86_64.egg
 carla-0.9.5-py3.5-linux-x86_64.egg
 Python_3.5.10/
+
+# ROS2 specific
+.ros/
+.catkin_workspace
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System specific
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+log/
+logs/
+*.log.*
