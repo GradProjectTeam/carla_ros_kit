@@ -7,26 +7,34 @@ This project integrates CARLA simulator's LIDAR sensor with ROS2, using a socket
 .
 ├── CARLA/
 │   ├── Sensors/
-│   │   └── Lidar.py         # CARLA LIDAR sensor (Python 3.5)
-│   ├── scripts/
-│   ├── CARLA_0.9.8/        # CARLA simulator
-│   ├── AdditionalMaps_0.9.8.tar.gz
-│   ├── CARLA_0.9.8.tar.gz
-│   ├── carla-0.9.5-py3.5-linux-x86_64.egg
-│   ├── carla-0.9.8-py3.5-linux-x86_64.egg  # CARLA Python API
-│   └── Python-3.5.10/      # Python 3.5 installation
-├── build/                  # ROS2 build directory
-├── install/                # ROS2 install directory
-├── log/                    # ROS2 log directory
+│   │   ├── IMU.py         # CARLA IMU sensor (Python 3.5)
+│   │   └── Lidar.py       # CARLA LIDAR sensor (Python 3.5)
+│   └── scripts/           # Additional CARLA scripts
 ├── my_python_pkg/         # ROS2 package
 │   ├── my_python_pkg/
 │   │   ├── __init__.py
+│   │   ├── imu_processor_node.py
 │   │   ├── lidar_processor_node.py
 │   │   ├── pub_node.py
 │   │   └── sensor_reader_node.py
+│   ├── resource/
+│   │   └── my_python_pkg  # Package resources
 │   ├── setup.py
 │   └── package.xml
-└── readme.md
+├── .gitignore            # Git ignore configuration
+├── RVIZ2.md             # RViz2 setup instructions
+└── readme.md            # This file
+```
+
+## Ignored Directories and Files
+The following are necessary but not tracked in git:
+```
+build/                  # ROS2 build artifacts
+install/                # ROS2 install files
+log/                    # ROS2 log files
+CARLA/CARLA_0.9.8/     # CARLA simulator
+CARLA/*.egg            # CARLA Python APIs
+**/__pycache__/        # Python cache files
 ```
 
 ## Prerequisites
