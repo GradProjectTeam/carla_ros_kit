@@ -7,6 +7,7 @@
 
 # Don't ignore ROS2 package
 !my_python_pkg/
+!my_python_pkg/config/
 !my_python_pkg/my_python_pkg/
 !my_python_pkg/my_python_pkg/*.py
 !my_python_pkg/setup.py

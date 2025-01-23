@@ -23,6 +23,7 @@ setup(
             'pub_node = my_python_pkg.pub_node:main',
             'lidar_processor_node = my_python_pkg.lidar_processor_node:main',
             'imu_processor_node = my_python_pkg.imu_processor_node:main',
+            'camera_processor_node = my_python_pkg.camera_processor_node:main',
         ],
     },
 )

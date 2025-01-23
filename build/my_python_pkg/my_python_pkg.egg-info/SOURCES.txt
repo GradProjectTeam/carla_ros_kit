@@ -9,6 +9,7 @@ setup.py
 ../build/my_python_pkg/my_python_pkg.egg-info/top_level.txt
 ../build/my_python_pkg/my_python_pkg.egg-info/zip-safe
 my_python_pkg/__init__.py
+my_python_pkg/camera_processor_node.py
 my_python_pkg/imu_processor_node.py
 my_python_pkg/lidar_processor_node.py
 my_python_pkg/pub_node.py
