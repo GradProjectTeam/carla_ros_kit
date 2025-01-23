@@ -10,6 +10,7 @@
 # In CARLA directory, keep only Python scripts
 CARLA/*
 !CARLA/*.py
+!CARLA/Sensors/*.py
 
 # Still ignore Python cache files
 **/__pycache__/
