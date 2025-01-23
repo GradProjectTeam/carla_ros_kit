@@ -1,2 +1,3 @@
 [console_scripts]
+lidar_processor_node = my_python_pkg.lidar_processor_node:main
 pub_node = my_python_pkg.pub_node:main

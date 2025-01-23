@@ -1,15 +1,25 @@
 # Ignore everything
 *
 
-# Don't ignore CARLA directory
+# Don't ignore CARLA directory and its contents
 !CARLA/
+!CARLA/Sensors/
+
+# Don't ignore ROS2 package
+!my_python_pkg/
+!my_python_pkg/my_python_pkg/
+!my_python_pkg/my_python_pkg/*.py
+!my_python_pkg/setup.py
+!my_python_pkg/package.xml
+!my_python_pkg/resource/
 
 # Don't ignore .gitignore
 !.gitignore
 
-# In CARLA directory, keep only Python scripts
+# In CARLA directory, keep Python scripts and Sensors
 CARLA/*
 !CARLA/*.py
+!CARLA/Sensors/
 !CARLA/Sensors/*.py
 
 # Still ignore Python cache files

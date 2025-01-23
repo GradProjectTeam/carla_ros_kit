@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pub_node = my_python_pkg.pub_node:main',
+            'lidar_processor_node = my_python_pkg.lidar_processor_node:main',
         ],
     },
 )
