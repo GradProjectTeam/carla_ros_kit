@@ -76,8 +76,8 @@ try:
     # Add RGB camera for lane detection
     camera_bp = blueprint_library.find('sensor.camera.rgb')
     # Set camera attributes for lane detection
-    camera_bp.set_attribute('image_size_x', '800')
-    camera_bp.set_attribute('image_size_y', '600')
+    camera_bp.set_attribute('image_size_x', '640')
+    camera_bp.set_attribute('image_size_y', '480')
     camera_bp.set_attribute('fov', '90')
     camera_bp.set_attribute('sensor_tick', '0.1')  # 10 FPS
 
