@@ -3,7 +3,6 @@ import sys
 import glob
 import os
 import socket
-import numpy as np
 import time
 import struct
 import math
@@ -13,7 +12,7 @@ print("Starting IMU script...")
 print("Python version:", sys.version)
 
 try:
-    # CARLA setup
+   # CARLA setup
     carla_path = '../'
     print("Looking for CARLA at:", carla_path)
     carla_eggs = glob.glob('{0}/carla-*{1}.{2}-{3}.egg'.format(
@@ -42,19 +41,15 @@ try:
         if 'vehicle' in actor.type_id:
             actor.destroy()
     print("Cleared existing vehicles")
-
-    # Setup TCP socket for IMU data
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    host_ip = '0.0.0.0'
-    port = 12346  # Changed port for IMU
-    server_socket.bind((host_ip, port))
-    server_socket.listen(1)
-    print("Waiting for connection on {}:{}".format(host_ip, port))
-
-    # Initialize client socket as global
+    
+    # Setup TCP client for IMU data
     client_socket = None
+    host_ip = '127.0.0.1'
+    port = 12346
+    print("Connecting to {}:{}...".format(host_ip, port))
+
+    # Example: send IMU data (4 floats)
+   
 
     # Get spawn points
     spawn_points = world.get_map().get_spawn_points()
@@ -100,96 +95,121 @@ try:
         global client_socket
         while True:
             try:
-                print("\nWaiting for ROS node connection...")
-                client_socket, addr = server_socket.accept()
-                print("Connected to:", addr)
+                # Create new socket if needed
+                if client_socket is None:
+                    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                
+                print("\nWaiting for connection...")
+                client_socket.connect((host_ip, port))
+                print("Connected to {0}:{1}".format(host_ip, port))
                 return
             except Exception as e:
                 print("Connection failed:", str(e))
+                if client_socket:
+                    client_socket.close()
+                    client_socket = None
                 print("Retrying in 2 seconds...")
                 time.sleep(2)
 
     def imu_callback(imu_data):
         global client_socket
+        if not client_socket:
+            return  # Skip if no connection
+        
         try:
-            # Pack IMU data
-            data = {
-                'accelerometer': {
-                    'x': imu_data.accelerometer.x,
-                    'y': imu_data.accelerometer.y,
-                    'z': imu_data.accelerometer.z
-                },
-                'gyroscope': {
-                    'x': imu_data.gyroscope.x,
-                    'y': imu_data.gyroscope.y,
-                    'z': imu_data.gyroscope.z
-                },
-                'compass': imu_data.compass
-            }
-            
-            # Convert to bytes
-            data_bytes = struct.pack('!7f', 
-                data['accelerometer']['x'],
-                data['accelerometer']['y'],
-                data['accelerometer']['z'],
-                data['gyroscope']['x'],
-                data['gyroscope']['y'],
-                data['gyroscope']['z'],
-                data['compass']
-            )
-            
+            # Validate IMU data before packing
+            if not all(hasattr(imu_data, attr) for attr in ['accelerometer', 'gyroscope', 'compass']):
+                print("Invalid IMU data structure")
+                return
+
+            print(imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z)
+            print(imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z)
+            print(imu_data.compass) 
+            # Pack IMU data with safety checks
             try:
-                if client_socket is None or client_socket.fileno() == -1:
-                    wait_for_connection()
-                
-                # Send data size first
-                size_header = struct.pack('!I', len(data_bytes))
-                client_socket.sendall(size_header)
-                # Send IMU data
-                client_socket.sendall(data_bytes)
-                
-            except (BrokenPipeError, ConnectionResetError, OSError) as e:
-                print("\nConnection lost:", str(e))
-                if client_socket:
-                    client_socket.close()
-                client_socket = None
-                wait_for_connection()
+                data_bytes = struct.pack('!7f',
+                    float(imu_data.accelerometer.x),
+                    float(imu_data.accelerometer.y),
+                    float(imu_data.accelerometer.z),
+                    float(imu_data.gyroscope.x),
+                    float(imu_data.gyroscope.y),
+                    float(imu_data.gyroscope.z),
+                    float(imu_data.compass)
+                )
+            except (AttributeError, TypeError, struct.error) as e:
+                print("Error packing IMU data: {0}".format(str(e)))
+                return
+
+            # Send data with timeout
+            client_socket.settimeout(1.0)  # 1 second timeout
+            client_socket.sendall(data_bytes)
+            client_socket.settimeout(None)  # Reset timeout
             
+        except (BrokenPipeError, ConnectionResetError, OSError, socket.timeout) as e:
+            print("\nConnection error: {0}".format(str(e)))
+            if client_socket:
+                client_socket.close()
+                client_socket = None
         except Exception as e:
-            print("\nError in IMU callback:", str(e))
+            print("\nUnexpected error in IMU callback: {0}".format(str(e)))
 
     # Register IMU callback
     imu.listen(imu_callback)
     print("IMU callback registered")
     print("\nIMU data streaming on port", port)
 
-    # Initial connection
+    # Initialize socket as None
+    client_socket = None
+    
+    # Initial connection attempt
     wait_for_connection()
 
     try:
         while True:
+            # Attempt reconnection if needed
+            if client_socket is None:
+                wait_for_connection()
             world.tick()
-            time.sleep(0.1)  # 10 FPS
+            time.sleep(0.1)
 
     except KeyboardInterrupt:
         print("\nStopping...")
     
     finally:
         print("Cleaning up...")
+        # Disable synchronous mode
+        settings = world.get_settings()
         settings.synchronous_mode = False
         world.apply_settings(settings)
         
+        # Clean up IMU and vehicle
         print("Destroying actors...")
         for actor in actor_list:
-            actor.destroy()
+            if actor is not None and actor.is_alive:
+                actor.destroy()
         
-        if 'client_socket' in globals():
-            client_socket.close()
-        server_socket.close()
+        # Close socket properly
+        if 'client_socket' in globals() and client_socket is not None:
+            try:
+                client_socket.shutdown(socket.SHUT_RDWR)
+                client_socket.close()
+            except:
+                pass
         print("Clean up complete")
 
 except Exception as e:
-    print("Error: {}".format(str(e)))
+    print("Error: {0}".format(str(e)))
+    # Emergency cleanup
+    if 'actor_list' in locals():
+        for actor in actor_list:
+            if actor is not None and actor.is_alive:
+                actor.destroy()
+    if 'client_socket' in locals() and client_socket is not None:
+        try:
+            client_socket.close()
+        except:
+            pass
     sys.exit(1)
 
 print("Script finished successfully")
