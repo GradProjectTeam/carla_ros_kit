@@ -3,6 +3,7 @@ import sys
 import glob
 import os
 import socket
+import numpy as np
 import time
 import struct
 import math
@@ -45,7 +46,7 @@ try:
     # Setup TCP client for IMU data
     client_socket = None
     host_ip = '127.0.0.1'
-    port = 12347
+    port = 12346
     print("Connecting to {}:{}...".format(host_ip, port))
 
     # Example: send IMU data (4 floats)
@@ -74,15 +75,12 @@ try:
     
     # Spawn IMU with adjusted position
     imu_location = carla.Transform(
-        carla.Location(x=0.0, y=0.0, z=0.0),  # Center of vehicle, 1m up
+        carla.Location(x=0.0, z=1.0),  # Center of vehicle, 1m up
         carla.Rotation()
     )
     imu = world.spawn_actor(imu_bp, imu_location, attach_to=vehicle)
     actor_list.append(imu)
     print("\nIMU sensor added")
-
-    map_name = world.get_map().name
-    print("Current map: ", map_name)
 
     # Enable autopilot
     vehicle.set_autopilot(True)
@@ -126,12 +124,6 @@ try:
                 print("Invalid IMU data structure")
                 return
 
-            print(imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z)
-            print(imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z)
-            print(imu_data.compass) 
-
-            #print x,y,z of the vehicle
-            print(vehicle.get_location().x, vehicle.get_location().y, vehicle.get_location().z)
             # Pack IMU data with safety checks
             try:
                 data_bytes = struct.pack('!7f',

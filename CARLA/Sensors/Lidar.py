@@ -157,8 +157,7 @@ try:
                     wait_for_connection()
                 
                 # Send data size first
-                size_header = struct.pack('!I', len(raw_data))
-                client_socket.sendall(size_header)
+            
                 # Send raw data
                 client_socket.sendall(raw_data)
                 
@@ -224,7 +223,7 @@ def start_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     
     # Use localhost instead of hostname for better compatibility
-    host = 'localhost'
+    host = '10.42.0.1'  
     port = 12343
     
     try:
@@ -254,7 +253,7 @@ def start_client():
     # Create client socket
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     
-    host = 'localhost'
+    host = '10.42.0.1'
     port = 12345
     
     try:
@@ -277,7 +276,7 @@ def start_client():
 def main():
     # Set up socket server
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('localhost', 12345))
+    server_socket.bind(('0.0.0.0', 12345))
     server_socket.listen(1)
     print("Waiting for ROS2 client connection...")
     
