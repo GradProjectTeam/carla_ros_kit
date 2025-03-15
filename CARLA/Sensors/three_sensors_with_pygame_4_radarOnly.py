@@ -64,7 +64,7 @@ class SensorManager:
         
         # Add CSV file setup
         self.csv_file = None
-        self.setup_csv_file()
+        # self.setup_csv_file()
         
     def setup_tcp_sockets(self):
         # # LiDAR socket
@@ -121,53 +121,25 @@ class SensorManager:
             try:
                 if not self.radar_queue.empty():
                     radar_data = self.radar_queue.get()
-                    points = np.array([[det.altitude, det.azimuth, det.depth, det.velocity] 
-                                    for det in radar_data], dtype=np.float32)
-                    
-                    
+                    points = [[det.altitude, det.azimuth, det.depth, det.velocity] 
+                            for det in radar_data]
                     
                     for point in points:
                         if not self.running:
                             break
                         
-                        
-                        altitude, azimuth, depth, velocity = point
-                        # # Write to CSV file
-                        # if self.csv_file:
-                        #     altitude, azimuth, depth, velocity = point
-                        #     csv_line = "{altitude:.3f},{azimuth:.3f},{depth:.3f},{velocity:.3f}\n".format( altitude, azimuth, depth, velocity)
-                        #     self.csv_file.write(csv_line)
-                        #     self.csv_file.flush()  # Ensure data is written immediately
-                        
-                        # # Convert spherical to Cartesian coordinates
-                        # x = depth * math.cos(altitude) * math.cos(azimuth)
-                        # y = depth * math.cos(altitude) * math.sin(azimuth)
-                        # z = depth * math.sin(altitude)
-                        
-                        # # Calculate relative velocity components
-                        # vel_x = velocity * math.cos(altitude) * math.cos(azimuth)
-                        # vel_y = velocity * math.cos(altitude) * math.sin(azimuth)
-                        # vel_z = velocity * math.sin(altitude)
-                        
-                        # # Print processed radar data
-                        # print("Radar Detection:")
-                        # print("  Position (x,y,z): ({:.2f}m, {:.2f}m, {:.2f}m)".format(x, y, z))
-                        # print("  Velocity (x,y,z): ({:.2f}m/s, {:.2f}m/s, {:.2f}m/s)".format(vel_x, vel_y, vel_z))
-                        # print("  Distance: {:.2f}m, Speed: {:.2f}m/s".format(depth, velocity))
-                        
-                        # Pack data for sending
-                        # data = np.array([x, y, z, vel_x, vel_y, vel_z], dtype=np.float32).tobytes()
-                        
-                        
+                        # Pack the data properly using struct
+                        data = struct.pack('!ffff', *point)  # Network byte order (big-endian)
                         try:
-                            self.radar_socket.sendall(data)
+                            self.radar_socket.send(data)
+                            print("Sent radar data: alt={point[0]:.3f}, az={point[1]:.3f}, depth={point[2]:.3f}, vel={point[3]:.3f}".format(point=point))
                         except socket.error as e:
-                            print("Radar socket error: {0}".format(e))
+                            print("Radar socket error: {e}".format(e))
                             break
                 else:
-                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
+                    time.sleep(0.001)
             except Exception as e:
-                print("Error in Radar processing thread: {0}".format(e))
+                print("Error in radar processing: {e}".format(e))
     
     def lidar_callback(self, point_cloud):
         try:
@@ -280,21 +252,14 @@ class SensorManager:
             print("Error in Radar setup: {0}".format(str(e)))
             raise
 
-    def setup_csv_file(self):
-        try:
-            # Create a timestamp for the filename
-            timestamp = time.strftime("%Y%m%d-%H%M%S")
-            filename = 'radar_data.csv'.format(timestamp)
-            
-            # Open CSV file and write header
-            self.csv_file = open(filename, 'w')
-            header = "timestamp,altitude,azimuth,depth,velocity\n"
-            self.csv_file.write(header)
-            print("Created CSV file: {0}".format(filename))
-            
-        except Exception as e:
-            print("Error setting up CSV file: {0}".format(e))
-            self.csv_file = None
+    # def setup_csv_file(self):
+    #     try:
+    #         timestamp = time.strftime("%Y%m%d-%H%M%S")
+    #         filename = 'radar_data_{0}.csv'.format(timestamp)
+    #         # self.csv_file = open(filename, 'w')
+    #         # self.csv_file.write("timestamp,altitude,azimuth,depth,velocity\n")
+    #     except Exception as e:
+    #         # self.csv_file = None
 
 class CarlaControl:
     def __init__(self):
