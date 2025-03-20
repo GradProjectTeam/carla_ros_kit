@@ -44,16 +44,19 @@ class SensorManager:
         # Data queues with thread-safe implementation
         self.lidar_queue = Queue(maxsize=1)
         self.radar_queue = Queue(maxsize=1)
+        self.imu_queue = Queue(maxsize=1)  # New IMU queue
         
         # TCP setup with different ports
         self.host_ip = '127.0.0.1'
         self.lidar_port = 12349
         self.radar_port = 12347
+        self.imu_port = 12341  # New IMU port
         
         # Thread control
         self.running = True
         self.lidar_thread = None
         self.radar_thread = None
+        self.imu_thread = None  # New IMU thread
         
         # Setup separate sockets for each sensor
         self.setup_tcp_sockets()
@@ -73,15 +76,23 @@ class SensorManager:
         self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         print("Radar TCP configured for {0}:{1}".format(self.host_ip, self.radar_port))
         
+        # IMU socket
+        self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print("IMU TCP configured for {0}:{1}".format(self.host_ip, self.imu_port))
+        
     def start_processing_threads(self):
         self.lidar_thread = threading.Thread(target=self.process_lidar_queue)
         self.radar_thread = threading.Thread(target=self.process_radar_queue)
+        self.imu_thread = threading.Thread(target=self.process_imu_queue)  # New IMU thread
         
         self.lidar_thread.daemon = True
         self.radar_thread.daemon = True
+        self.imu_thread.daemon = True  # Set as daemon thread
         
         self.lidar_thread.start()
         self.radar_thread.start()
+        self.imu_thread.start()  # Start IMU thread
         
     def process_lidar_queue(self):
         while self.running:
@@ -124,6 +135,25 @@ class SensorManager:
             except Exception as e:
                 print("Error in Radar processing thread: {0}".format(e))
     
+    def process_imu_queue(self):
+        while self.running:
+            try:
+                if not self.imu_queue.empty():
+                    imu_data = self.imu_queue.get()
+                    # Pack IMU data: acceleration (3 floats) + gyroscope (3 floats) + compass (1 float)
+                    data = struct.pack('fffffff', 
+                                     imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z,
+                                     imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z,
+                                     imu_data.compass)
+                    try:
+                        self.imu_socket.sendall(data)
+                    except socket.error as e:
+                        print("IMU socket error: {0}".format(e))
+                else:
+                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
+            except Exception as e:
+                print("Error in IMU processing thread: {0}".format(e))
+    
     def lidar_callback(self, point_cloud):
         try:
             if self.lidar_queue.full():
@@ -146,6 +176,17 @@ class SensorManager:
         except Exception as e:
             print("Error in Radar callback: {0}".format(e))
         
+    def imu_callback(self, imu_data):
+        try:
+            if self.imu_queue.full():
+                try:
+                    self.imu_queue.get(block=False)  # Remove old data
+                except Queue.Empty:
+                    pass
+            self.imu_queue.put(imu_data, block=False)
+        except Exception as e:
+            print("Error in IMU callback: {0}".format(e))
+        
     def cleanup(self):
         print("Cleaning up sensors and sockets...")
         self.running = False  # Signal threads to stop
@@ -155,13 +196,15 @@ class SensorManager:
             self.lidar_thread.join(timeout=1.0)
         if self.radar_thread and self.radar_thread.is_alive():
             self.radar_thread.join(timeout=1.0)
+        if self.imu_thread and self.imu_thread.is_alive():
+            self.imu_thread.join(timeout=1.0)
         
         # Clean up actors
         for actor in self.actor_list:
             if actor is not None and actor.is_alive:
                 actor.destroy()
         
-        # # Close sockets
+        # Close sockets
         if hasattr(self, 'lidar_socket'):
             try:
                 self.lidar_socket.shutdown(socket.SHUT_RDWR)
@@ -176,12 +219,20 @@ class SensorManager:
             except Exception as e:
                 print("Error closing Radar socket: {0}".format(e))
                 
+        if hasattr(self, 'imu_socket'):
+            try:
+                self.imu_socket.shutdown(socket.SHUT_RDWR)
+                self.imu_socket.close()
+            except Exception as e:
+                print("Error closing IMU socket: {0}".format(e))
+                
         print("Sensor cleanup complete")
 
     def setup_sensors(self):
         try:
             self.setup_lidar()
             self.setup_radar()
+            self.setup_imu()  # Add IMU setup
             print("Sensors setup complete")
         except Exception as e:
             print("Error in setup_sensors: {0}".format(e))
@@ -241,6 +292,32 @@ class SensorManager:
             
         except Exception as e:
             print("Error in Radar setup: {0}".format(str(e)))
+            raise
+
+    def setup_imu(self):
+        try:
+            imu_bp = self.world.get_blueprint_library().find('sensor.other.imu')
+            
+            # Set IMU parameters
+            imu_bp.set_attribute('sensor_tick', '0.05')  # 20Hz update rate
+            
+            # Mount at the center of the car
+            imu_transform = carla.Transform(
+                carla.Location(x=0.0, z=0.0),  # Center of the vehicle
+                carla.Rotation()  # Default rotation
+            )
+            
+            self.imu = self.world.spawn_actor(imu_bp, imu_transform, attach_to=self.vehicle)
+            self.actor_list.append(self.imu)
+            self.imu.listen(self.imu_callback)
+            print("IMU sensor added")
+            
+            # Connect IMU socket
+            self.imu_socket.connect((self.host_ip, self.imu_port))
+            print("IMU TCP connected")
+            
+        except Exception as e:
+            print("Error in IMU setup: {0}".format(str(e)))
             raise
 
 class CarlaControl:
@@ -508,11 +585,14 @@ class CarlaControl:
             if hasattr(self, 'sensor_manager') and self.sensor_manager:
                 lidar_status = "LIDAR: Active" if not self.sensor_manager.lidar_queue.empty() else "LIDAR: Waiting"
                 radar_status = "RADAR: Active" if not self.sensor_manager.radar_queue.empty() else "RADAR: Waiting"
+                imu_status = "IMU: Active" if not self.sensor_manager.imu_queue.empty() else "IMU: Waiting"
                 
                 text = self.small_font.render(lidar_status, True, GREEN if "Active" in lidar_status else RED)
                 self.screen.blit(text, (20, 20))
                 text = self.small_font.render(radar_status, True, GREEN if "Active" in radar_status else RED)
                 self.screen.blit(text, (20, 40))
+                text = self.small_font.render(imu_status, True, GREEN if "Active" in imu_status else RED)
+                self.screen.blit(text, (20, 60))
             
             # Draw controls help
             help_texts = [
@@ -522,12 +602,13 @@ class CarlaControl:
                 "A/LEFT: Turn Left",
                 "D/RIGHT: Turn Right",
                 "SPACE: Handbrake",
+                "R: Toggle Reverse",
                 "ESC: Quit"
             ]
             
             for i, text in enumerate(help_texts):
                 help_surface = self.small_font.render(text, True, WHITE)
-                self.screen.blit(help_surface, (20, 80 + i * 20))
+                self.screen.blit(help_surface, (20, 100 + i * 20))  # Moved down to make room for IMU status
             
             pygame.display.flip()
             
