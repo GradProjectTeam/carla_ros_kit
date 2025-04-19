@@ -59,7 +59,7 @@ class SensorManager:
 
         self.lidar_flag = True
         self.radar_flag = False
-        self.imu_flag = False
+        self.imu_flag = True
         
         # Thread control
         self.running = True
@@ -159,7 +159,9 @@ class SensorManager:
                         data = point.tobytes()
                         try:
                             if self.radar_flag:
+                                print(point)
                                 self.radar_socket.sendall(data)
+
                         except socket.error as e:
                             print("Radar socket error: {0}".format(e))
                             break
@@ -178,8 +180,10 @@ class SensorManager:
                                      imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z,
                                      imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z,
                                      imu_data.compass)
+                    
                     try:
                         if self.imu_flag:
+                            
                             self.imu_socket.sendall(data)
                     except socket.error as e:
                         print("IMU socket error: {0}".format(e))
@@ -283,7 +287,7 @@ class SensorManager:
             lidar_bp.set_attribute('rotation_frequency', '20')
             lidar_bp.set_attribute('range', '50.0')
             lidar_bp.set_attribute('upper_fov', '10.0')
-            lidar_bp.set_attribute('lower_fov', '-30.0')
+            lidar_bp.set_attribute('lower_fov', '-30.0')    
             
             # Mount on top of the car, slightly forward
             lidar_transform = carla.Transform(
