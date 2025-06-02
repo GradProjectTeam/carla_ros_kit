@@ -75,24 +75,34 @@ class SensorManager:
         self.start_processing_threads()
         
     def setup_tcp_sockets(self):
-        # LiDAR socket
-
-        if self.lidar_flag:
-            self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("LiDAR TCP configured for {0}:{1}".format(self.host_ip, self.lidar_port))
-        
         # Radar socket
         if self.radar_flag:
             self.radar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("Radar TCP configured for {0}:{1}".format(self.host_ip, self.radar_port))
+            
+            # Set larger buffer sizes for better performance
+            self.radar_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)  # 64KB send buffer
+            
+            # Set keepalive to detect connection problems
+            self.radar_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            
+            print("Radar TCP configured for {0}:{1} with optimized settings".format(self.host_ip, self.radar_port))
+        
+        # LiDAR socket
+        if self.lidar_flag:
+            self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.lidar_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)  # 64KB send buffer
+            self.lidar_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            print("LiDAR TCP configured for {0}:{1} with optimized settings".format(self.host_ip, self.lidar_port))
         
         # IMU socket
         if self.imu_flag:
             self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("IMU TCP configured for {0}:{1}".format(self.host_ip, self.imu_port))
+            self.imu_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)  # 64KB send buffer
+            self.imu_socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            print("IMU TCP configured for {0}:{1} with optimized settings".format(self.host_ip, self.imu_port))
         
     def start_processing_threads(self):
         if self.lidar_flag:
@@ -158,25 +168,32 @@ class SensorManager:
                     points = np.array([[det.altitude, det.azimuth, det.depth, det.velocity] 
                                     for det in radar_data], dtype=np.float32)
                     
-                    print(f"\n[RADAR DEBUG] Received {len(points)} radar points from CARLA")
+                    # Only log every 50 points batch
+                    if point_counter % 50 == 0:
+                        print(f"[RADAR DEBUG] Processing batch of {len(points)} radar points")
                     
-                    for point in points:
-                        if not self.running:
-                            break
-                        
-                        # Print detailed debug info
-                        point_counter += 1
-                        print(f"[RADAR DEBUG] Processing point #{point_counter}: Alt={point[0]:.2f}, Az={point[1]:.2f}, Depth={point[2]:.2f}, Vel={point[3]:.2f}")
-                        
-                        # Pack data as network byte order (big-endian) float32 values
-                        data = struct.pack('!ffff', point[0], point[1], point[2], point[3])
+                    # Batch processing - send all points at once
+                    if len(points) > 0 and self.radar_flag:
                         try:
-                            if self.radar_flag:
-                                self.radar_socket.sendall(data)
-                                print(f"[RADAR DEBUG] Point #{point_counter} sent to TCP port {self.radar_port}")
+                            # First send the number of points in the batch
+                            num_points = struct.pack('!I', len(points))
+                            self.radar_socket.sendall(num_points)
+                            
+                            # Then send all points data in one go
+                            batch_data = bytearray()
+                            for point in points:
+                                # Pack each point
+                                point_data = struct.pack('!ffff', point[0], point[1], point[2], point[3])
+                                batch_data.extend(point_data)
+                            
+                            # Send the entire batch at once
+                            self.radar_socket.sendall(batch_data)
+                            point_counter += len(points)
+                            
+                            if point_counter % 50 == 0:
+                                print(f"[RADAR DEBUG] Sent batch of {len(points)} points, total: {point_counter}")
                         except socket.error as e:
-                            print(f"[RADAR ERROR] Socket error: {e}")
-                            break
+                            print(f"[RADAR ERROR] Socket error in batch send: {e}")
                 else:
                     time.sleep(0.001)  # Small sleep to prevent CPU hogging
             except Exception as e:
@@ -330,21 +347,23 @@ class SensorManager:
     def setup_radar(self):
         try:
             radar_bp = self.world.get_blueprint_library().find('sensor.other.radar')
-            radar_bp.set_attribute('horizontal_fov', '30.0')
-            radar_bp.set_attribute('vertical_fov', '10.0')
-            radar_bp.set_attribute('points_per_second', '1500')
-            radar_bp.set_attribute('range', '50.0')
+            # Increase horizontal FOV for wider coverage and vertical FOV for better height detection
+            radar_bp.set_attribute('horizontal_fov', '60.0')  # Increased from 30.0 for wider coverage
+            radar_bp.set_attribute('vertical_fov', '20.0')    # Increased from 10.0 for better height detection
+            radar_bp.set_attribute('points_per_second', '2000')  # Increased from 1500 for better resolution
+            radar_bp.set_attribute('range', '100.0')  # Increased from 50.0 for longer detection range
             
-            # Mount on front of the car, same height as lidar
+            # Mount next to the LiDAR with a slight horizontal offset
             radar_transform = carla.Transform(
-                carla.Location(x=1.5, z=2.0),  # x: forward, z: up
+                # Position radar at the same x (forward) position as LiDAR but offset to the right (y=0.5)
+                carla.Location(x=1.5, y=0.5, z=self.vehicle.get_transform().location.z),
                 carla.Rotation()  # Default rotation (0,0,0) will inherit car's rotation
             )
             
             self.radar = self.world.spawn_actor(radar_bp, radar_transform, attach_to=self.vehicle)
             self.actor_list.append(self.radar)
             self.radar.listen(self.radar_callback)
-            print("[RADAR DEBUG] Radar sensor added and listening")
+            print("[RADAR DEBUG] Radar sensor added and listening with optimized FOV settings")
             
             # Connect Radar socket
             if self.radar_flag:
