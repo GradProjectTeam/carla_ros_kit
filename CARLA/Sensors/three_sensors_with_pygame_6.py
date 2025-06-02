@@ -150,6 +150,7 @@ class SensorManager:
                 traceback.print_exc()
                 
     def process_radar_queue(self):
+        point_counter = 0  # Counter for radar points
         while self.running:
             try:
                 if not self.radar_queue.empty():
@@ -157,22 +158,31 @@ class SensorManager:
                     points = np.array([[det.altitude, det.azimuth, det.depth, det.velocity] 
                                     for det in radar_data], dtype=np.float32)
                     
+                    print(f"\n[RADAR DEBUG] Received {len(points)} radar points from CARLA")
+                    
                     for point in points:
                         if not self.running:
                             break
-                        data = point.tobytes()
+                        
+                        # Print detailed debug info
+                        point_counter += 1
+                        print(f"[RADAR DEBUG] Processing point #{point_counter}: Alt={point[0]:.2f}, Az={point[1]:.2f}, Depth={point[2]:.2f}, Vel={point[3]:.2f}")
+                        
+                        # Pack data as network byte order (big-endian) float32 values
+                        data = struct.pack('!ffff', point[0], point[1], point[2], point[3])
                         try:
                             if self.radar_flag:
-                                print(point)
                                 self.radar_socket.sendall(data)
-
+                                print(f"[RADAR DEBUG] Point #{point_counter} sent to TCP port {self.radar_port}")
                         except socket.error as e:
-                            print("Radar socket error: {0}".format(e))
+                            print(f"[RADAR ERROR] Socket error: {e}")
                             break
                 else:
                     time.sleep(0.001)  # Small sleep to prevent CPU hogging
             except Exception as e:
-                print("Error in Radar processing thread: {0}".format(e))
+                print(f"[RADAR ERROR] Processing error: {e}")
+                import traceback
+                traceback.print_exc()
     
     def process_imu_queue(self):
         while self.running:
@@ -209,14 +219,18 @@ class SensorManager:
         
     def radar_callback(self, radar_data):
         try:
+            # Print the raw radar detection count
+            print(f"[RADAR DEBUG] Radar callback received {len(radar_data)} detections")
+            
             if self.radar_queue.full():
                 try:
                     self.radar_queue.get(block=False)  # Python 3.5 compatible
                 except Queue.Empty:
                     pass
             self.radar_queue.put(radar_data, block=False)
+            print(f"[RADAR DEBUG] Added radar data to processing queue")
         except Exception as e:
-            print("Error in Radar callback: {0}".format(e))
+            print(f"[RADAR ERROR] Callback error: {e}")
         
     def imu_callback(self, imu_data):
         try:
@@ -330,15 +344,15 @@ class SensorManager:
             self.radar = self.world.spawn_actor(radar_bp, radar_transform, attach_to=self.vehicle)
             self.actor_list.append(self.radar)
             self.radar.listen(self.radar_callback)
-            print("Radar sensor added")
+            print("[RADAR DEBUG] Radar sensor added and listening")
             
             # Connect Radar socket
             if self.radar_flag:
                 self.radar_socket.connect((self.host_ip, self.radar_port))
-                print("Radar TCP connected")
+                print(f"[RADAR DEBUG] Radar TCP connected to {self.host_ip}:{self.radar_port}")
             
         except Exception as e:
-            print("Error in Radar setup: {0}".format(str(e)))
+            print(f"[RADAR ERROR] Setup error: {e}")
             raise
 
     def setup_imu(self):
