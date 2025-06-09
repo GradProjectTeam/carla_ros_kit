@@ -93,19 +93,20 @@ class CameraProcessorNode(Node):
             # Create timestamp
             timestamp = self.get_clock().now().to_msg()
             
-              # Line detection code
+            # Line detection code
             pt1_sum_ri = (0, 0)
             pt2_sum_ri = (0, 0)
             pt1_avg_ri = (0, 0)
+            pt2_avg_ri = (0, 0)
             count_posi_num_ri = 0
 
             pt1_sum_le = (0, 0)
             pt2_sum_le = (0, 0)
             pt1_avg_le = (0, 0)
+            pt2_avg_le = (0, 0)
             count_posi_num_le = 0
 
             # Convert the camera image to RGB format
-            
             RGB_Camera_im = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
             # Resize the image to VGA resolution
@@ -122,13 +123,16 @@ class CameraProcessorNode(Node):
 
             # Apply Hough Transformation to detect lines
             lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180.0, threshold=25, minLineLength=10, maxLineGap=20)
-            if lines is None:
-                lines = [[0, 0, 0, 0]]
-            else:
+
+            # Process detected lines
+            valid_right_lane = False
+            valid_left_lane = False
+            
+            if lines is not None:
                 for line in lines:
                     x1, y1, x2, y2 = line[0]
                     if x2 == x1:
-                        a = 1
+                        continue  # Skip vertical lines to avoid division by zero
                     else:
                         a = x2 - x1
                     b = y2 - y1
@@ -150,86 +154,104 @@ class CameraProcessorNode(Node):
                         pt1_sum_le = self.sumMatrix(pt1_le, pt1_sum_le)
                         pt2_sum_le = self.sumMatrix(pt2_le, pt2_sum_le)
 
-                pt1_avg_ri = pt1_sum_ri // np.array(count_posi_num_ri)
-                pt2_avg_ri = pt2_sum_ri // np.array(count_posi_num_ri)
-                pt1_avg_le = pt1_sum_le // np.array(count_posi_num_le)
-                pt2_avg_le = pt2_sum_le // np.array(count_posi_num_le)
-
-                # Calculate the right lane line
+            # Process right lane if valid points were found
+            if count_posi_num_ri > 0:
+                valid_right_lane = True
+                pt1_avg_ri = (np.array(pt1_sum_ri) / count_posi_num_ri).astype(int)
+                pt2_avg_ri = (np.array(pt2_sum_ri) / count_posi_num_ri).astype(int)
                 x1_avg_ri, y1_avg_ri = pt1_avg_ri
                 x2_avg_ri, y2_avg_ri = pt2_avg_ri
-                a_avg_ri = (y2_avg_ri - y1_avg_ri) / (x2_avg_ri - x1_avg_ri)
-                b_avg_ri = y2_avg_ri - (a_avg_ri * x2_avg_ri)
-                pt2_y2_fi_ri = 480
-                pt2_x2_fi_ri = int((pt2_y2_fi_ri - b_avg_ri) // a_avg_ri) if a_avg_ri > 0 else 0
-                pt2_fi_ri = (pt2_x2_fi_ri, pt2_y2_fi_ri)
+                
+                # Avoid division by zero
+                if x2_avg_ri != x1_avg_ri:
+                    a_avg_ri = (y2_avg_ri - y1_avg_ri) / (x2_avg_ri - x1_avg_ri)
+                    b_avg_ri = y2_avg_ri - (a_avg_ri * x2_avg_ri)
+                    pt2_y2_fi_ri = 480
+                    
+                    # Check if slope is valid before doing division
+                    if a_avg_ri != 0:
+                        pt2_x2_fi_ri = int((pt2_y2_fi_ri - b_avg_ri) / a_avg_ri)
+                        # Ensure point is within image bounds
+                        pt2_x2_fi_ri = max(0, min(640, pt2_x2_fi_ri))
+                        pt2_fi_ri = (pt2_x2_fi_ri, pt2_y2_fi_ri)
+                        # Draw the right lane line
+                        cv2.line(size_im, tuple(pt1_avg_ri), pt2_fi_ri, (0, 255, 0), 2)
+                else:
+                    valid_right_lane = False
 
-                # Calculate the left lane line
+            # Process left lane if valid points were found
+            if count_posi_num_le > 0:
+                valid_left_lane = True
+                pt1_avg_le = (np.array(pt1_sum_le) / count_posi_num_le).astype(int)
+                pt2_avg_le = (np.array(pt2_sum_le) / count_posi_num_le).astype(int)
                 x1_avg_le, y1_avg_le = pt1_avg_le
                 x2_avg_le, y2_avg_le = pt2_avg_le
-                a_avg_le = (y2_avg_le - y1_avg_le) / (x2_avg_le - x1_avg_le)
-                b_avg_le = y2_avg_le - (a_avg_le * x2_avg_le)
-                pt1_y1_fi_le = 480
-                pt1_x1_fi_le = int((pt1_y1_fi_le - b_avg_le) // a_avg_le) if a_avg_le < 0 else 0
-                pt1_fi_le = (pt1_x1_fi_le, pt1_y1_fi_le)
+                
+                # Avoid division by zero
+                if x2_avg_le != x1_avg_le:
+                    a_avg_le = (y2_avg_le - y1_avg_le) / (x2_avg_le - x1_avg_le)
+                    b_avg_le = y2_avg_le - (a_avg_le * x2_avg_le)
+                    pt1_y1_fi_le = 480
+                    
+                    # Check if slope is valid before doing division
+                    if a_avg_le != 0:
+                        pt1_x1_fi_le = int((pt1_y1_fi_le - b_avg_le) / a_avg_le)
+                        # Ensure point is within image bounds
+                        pt1_x1_fi_le = max(0, min(640, pt1_x1_fi_le))
+                        pt1_fi_le = (pt1_x1_fi_le, pt1_y1_fi_le)
+                        # Draw the left lane line
+                        cv2.line(size_im, tuple(pt2_avg_le), pt1_fi_le, (0, 255, 0), 2)
+                else:
+                    valid_left_lane = False
 
-                # Draw the lane lines on the image
-                cv2.line(size_im, tuple(pt1_avg_ri), tuple(pt2_fi_ri), (0, 255, 0), 2)
-                cv2.line(size_im, tuple(pt1_fi_le), tuple(pt2_avg_le), (0, 255, 0), 2)
-                cv2.line(size_im, (320, 480), (320, 360), (0, 228, 255), 1)
+            # Draw center line
+            cv2.line(size_im, (320, 480), (320, 360), (0, 228, 255), 1)
 
-                # Highlight the possible lane area
-                FCP_img = np.zeros(shape=(480, 640, 3), dtype=np.uint8) + 0
-                FCP = np.array([pt2_avg_le, pt1_fi_le, pt2_fi_ri, pt1_avg_ri])
-                cv2.fillConvexPoly(FCP_img, FCP, color=(255, 242, 213))
-                alpha = 0.9
-                size_im = cv2.addWeighted(size_im, alpha, FCP_img, 1 - alpha, 0)
+            # Only proceed with lane highlighting and steering if both lanes are valid
+            if valid_right_lane and valid_left_lane:
+                try:
+                    # Highlight the possible lane area
+                    FCP_img = np.zeros(shape=(480, 640, 3), dtype=np.uint8) + 0
+                    FCP = np.array([pt2_avg_le, pt1_fi_le, pt2_fi_ri, pt1_avg_ri])
+                    cv2.fillConvexPoly(FCP_img, FCP, color=(255, 242, 213))
+                    alpha = 0.9
+                    size_im = cv2.addWeighted(size_im, alpha, FCP_img, 1 - alpha, 0)
 
-                # Calculate the lane center and steering direction
-                lane_center_y_ri = 360
-                lane_center_x_ri = int((lane_center_y_ri - b_avg_ri) // a_avg_ri) if a_avg_ri > 0 else 0
-                lane_center_y_le = 360
-                lane_center_x_le = int((lane_center_y_le - b_avg_le) // a_avg_le) if a_avg_le < 0 else 0
-                lane_center_x = ((lane_center_x_ri - lane_center_x_le) // 2) + lane_center_x_le
+                    # Calculate the lane center and steering direction
+                    lane_center_y_ri = 360
+                    lane_center_y_le = 360
+                    
+                    # Avoid NaN values in calculations
+                    if a_avg_ri != 0 and a_avg_le != 0:
+                        lane_center_x_ri = int((lane_center_y_ri - b_avg_ri) / a_avg_ri)
+                        lane_center_x_le = int((lane_center_y_le - b_avg_le) / a_avg_le)
+                        
+                        # Ensure values are within image bounds
+                        lane_center_x_ri = max(0, min(640, lane_center_x_ri))
+                        lane_center_x_le = max(0, min(640, lane_center_x_le))
+                        
+                        lane_center_x = ((lane_center_x_ri - lane_center_x_le) // 2) + lane_center_x_le
 
-                # Draw the lane center lines
-                cv2.line(size_im, (lane_center_x_le, lane_center_y_le - 10), (lane_center_x_le, lane_center_y_le + 10), (0, 228, 255), 1)
-                cv2.line(size_im, (lane_center_x_ri, lane_center_y_ri - 10), (lane_center_x_ri, lane_center_y_ri + 10), (0, 228, 255), 1)
-                cv2.line(size_im, (lane_center_x, lane_center_y_ri - 10), (lane_center_x, lane_center_y_le + 10), (0, 228, 255), 1)
+                        # Draw the lane center lines
+                        cv2.line(size_im, (lane_center_x_le, lane_center_y_le - 10), (lane_center_x_le, lane_center_y_le + 10), (0, 228, 255), 1)
+                        cv2.line(size_im, (lane_center_x_ri, lane_center_y_ri - 10), (lane_center_x_ri, lane_center_y_ri + 10), (0, 228, 255), 1)
+                        cv2.line(size_im, (lane_center_x, lane_center_y_ri - 10), (lane_center_x, lane_center_y_le + 10), (0, 228, 255), 1)
 
-                # Display the steering direction
-                text_left = 'Turn Left'
-                text_right = 'Turn Right'
-                text_center = 'Center'
-                text_non = ''
-                org = (320, 440)
-                font = cv2.FONT_HERSHEY_SIMPLEX
+                        # Display the steering direction
+                        text_left = 'Turn Left'
+                        text_right = 'Turn Right'
+                        text_center = 'Center'
+                        org = (320, 440)
+                        font = cv2.FONT_HERSHEY_SIMPLEX
 
-                if 0 < lane_center_x <= 318:
-                    cv2.putText(size_im, text_left, org, font, 0.7, (0, 0, 255), 2)
-                elif 318 < lane_center_x < 322:
-                    cv2.putText(size_im, text_center, org, font, 0.7, (0, 0, 255), 2)
-                elif lane_center_x >= 322:
-                    cv2.putText(size_im, text_right, org, font, 0.7, (0, 0, 255), 2)
-                elif lane_center_x == 0:
-                    cv2.putText(size_im, text_non, org, font, 0.7, (0, 0, 255), 2)
-
-                global test_con
-                test_con = 1
-
-                # Reset variables
-                count_posi_num_ri = 0
-                pt1_sum_ri = (0, 0)
-                pt2_sum_ri = (0, 0)
-                pt1_avg_ri = (0, 0)
-                pt2_avg_ri = (0, 0)
-                count_posi_num_le = 0
-                pt1_sum_le = (0, 0)
-                pt2_sum_le = (0, 0)
-                pt1_avg_le = (0, 0)
-                pt2_avg_le = (0, 0)
-
-            # Convert to ROS Image message
+                        if 0 < lane_center_x <= 318:
+                            cv2.putText(size_im, text_left, org, font, 0.7, (0, 0, 255), 2)
+                        elif 318 < lane_center_x < 322:
+                            cv2.putText(size_im, text_center, org, font, 0.7, (0, 0, 255), 2)
+                        elif lane_center_x >= 322:
+                            cv2.putText(size_im, text_right, org, font, 0.7, (0, 0, 255), 2)
+                except Exception as e:
+                    self.get_logger().warn(f'Error in lane calculation: {str(e)}')
 
             # Convert to ROS Image message
             ros_image = self.bridge.cv2_to_imgmsg(size_im, encoding='rgb8')
