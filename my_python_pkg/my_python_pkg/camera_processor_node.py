@@ -10,6 +10,7 @@ import struct
 import numpy as np
 import cv2
 import math
+from collections import deque
 class CameraProcessorNode(Node):
     def __init__(self):
         super().__init__('camera_processor')
@@ -29,12 +30,81 @@ class CameraProcessorNode(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
         
         # Socket setup
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect(('localhost', 12347))
-        self.get_logger().info(f'Connected to camera socket server, expecting {self.IMAGE_WIDTH}x{self.IMAGE_HEIGHT} images')
+        self.server_host = 'localhost'
+        self.server_port = 12342  # Port for four_sensors camera
         
-        # Create timer for processing camera data
-        self.create_timer(0.1, self.timer_callback)  # 10Hz
+        # Create a timer for connection attempts
+        self.socket = None
+        self.connected = False
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 20  # Try 20 times before giving up
+        
+        # Create connection timer
+        self.create_timer(1.0, self.connect_to_camera_server)
+        
+        # Memory for lane tracking
+        self.last_valid_right_lane = None
+        self.last_valid_left_lane = None
+        self.last_lane_center = 320  # Default center
+        self.lane_memory_frames = 10  # Remember lanes for this many frames
+        
+        # Queue to store recent lane positions for smoothing
+        self.right_lane_history = deque(maxlen=5)
+        self.left_lane_history = deque(maxlen=5)
+        self.lane_center_history = deque(maxlen=5)
+        self.lane_center_history.append(320)  # Initialize with center position
+        
+        # Define expected lane positions
+        self.expected_left_x = 220   # Expected x-position of left lane at bottom of image
+        self.expected_right_x = 420  # Expected x-position of right lane at bottom of image
+        self.lane_width_tolerance = 100  # Tolerance for lane width variation
+        
+        # Lane detection parameters
+        self.min_lane_points = 5     # Minimum points needed to fit a lane
+        self.min_line_length = 20    # Minimum line length for Hough transform
+        self.max_line_gap = 30       # Maximum line gap for Hough transform
+        self.lane_detection_threshold = 20  # Hough transform threshold
+
+    def connect_to_camera_server(self):
+        """Attempt to connect to the camera server"""
+        if self.connected:
+            # Already connected, no need to reconnect
+            return
+            
+        if self.reconnect_attempts >= self.max_reconnect_attempts:
+            self.get_logger().error('Maximum reconnection attempts reached. Giving up.')
+            return
+            
+        try:
+            # Close any existing socket
+            if self.socket:
+                try:
+                    self.socket.close()
+                except Exception:
+                    pass
+                    
+            # Create a new socket and attempt to connect
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(5.0)  # 5 second timeout for connection
+            
+            self.get_logger().info(f'Connecting to camera server at {self.server_host}:{self.server_port} (attempt {self.reconnect_attempts+1}/{self.max_reconnect_attempts})')
+            self.socket.connect((self.server_host, self.server_port))
+            
+            # Connection successful
+            self.connected = True
+            self.reconnect_attempts = 0
+            self.get_logger().info(f'Successfully connected to camera server, expecting {self.IMAGE_WIDTH}x{self.IMAGE_HEIGHT} images')
+            
+            # Create timer for processing camera data once connected
+            self.create_timer(0.1, self.timer_callback)  # 10Hz
+            
+        except ConnectionRefusedError:
+            self.reconnect_attempts += 1
+            self.get_logger().warn(f'Connection refused. Is the camera server running? Retrying in 1 second...')
+            
+        except Exception as e:
+            self.reconnect_attempts += 1
+            self.get_logger().error(f'Failed to connect to camera server: {e}. Retrying in 1 second...')
 
     def publish_camera_tf(self, timestamp):
         t = TransformStamped()
@@ -63,10 +133,23 @@ class CameraProcessorNode(Node):
 
     def timer_callback(self):
         try:
-            # Receive image size
-            size_data = self.socket.recv(4)
-            if not size_data:
+            # Check if we're connected
+            if not self.connected or not self.socket:
+                self.get_logger().warn('Not connected to camera server. Skipping frame processing.')
                 return
+                
+            # Receive image size
+            try:
+                size_data = self.socket.recv(4)
+                if not size_data:
+                    self.get_logger().warn('Connection lost (empty data). Will try to reconnect.')
+                    self.connected = False
+                    return
+            except (socket.timeout, ConnectionResetError, BrokenPipeError) as e:
+                self.get_logger().warn(f'Connection error: {e}. Will try to reconnect.')
+                self.connected = False
+                return
+                
             image_size = struct.unpack('!I', size_data)[0]
             
             # Expected size check
@@ -76,11 +159,18 @@ class CameraProcessorNode(Node):
             
             # Receive image data
             image_data = b''
-            while len(image_data) < image_size:
-                chunk = self.socket.recv(image_size - len(image_data))
-                if not chunk:
-                    break
-                image_data += chunk
+            try:
+                while len(image_data) < image_size:
+                    chunk = self.socket.recv(min(4096, image_size - len(image_data)))
+                    if not chunk:
+                        self.get_logger().warn('Connection lost while receiving image data. Will try to reconnect.')
+                        self.connected = False
+                        return
+                    image_data += chunk
+            except (socket.timeout, ConnectionResetError, BrokenPipeError) as e:
+                self.get_logger().warn(f'Connection error while receiving image data: {e}. Will try to reconnect.')
+                self.connected = False
+                return
             
             # Convert to numpy array and reshape
             image_array = np.frombuffer(image_data, dtype=np.uint8)
@@ -266,8 +356,11 @@ class CameraProcessorNode(Node):
             self.get_logger().error(f'Error processing camera data: {str(e)}')
 
     def __del__(self):
-        if hasattr(self, 'socket'):
-            self.socket.close()
+        if hasattr(self, 'socket') and self.socket:
+            try:
+                self.socket.close()
+            except Exception:
+                pass
 
 def main(args=None):
     rclpy.init(args=args)
