@@ -1,4 +1,4 @@
-#! /usr/local/bin/python3.5m
+#! /usr/bin/python3.7
 import sys
 import glob
 import os
@@ -14,6 +14,7 @@ import pygame
 from pygame.locals import *
 import threading
 from queue import Queue
+import traceback
 
 # Version 6: Added traffic vehicles in front of the main vehicle
 # The traffic vehicles have no sensors and use CARLA's autopilot system
@@ -22,7 +23,7 @@ from queue import Queue
 class CARLASetup:
     def __init__(self):
         print("Starting CARLA setup...")
-        self.carla_path = '/home/mostafa/ROS2andCarla/CARLA/CARLA_0.9.8/PythonAPI/carla/dist'
+        self.carla_path = '/home/shishtawy/Carla/CARLA_0.9.12/PythonAPI/carla/dist'
         self.setup_carla()
         
     def setup_carla(self):
@@ -42,6 +43,7 @@ class CARLASetup:
 
 class SensorManager:
     def __init__(self, vehicle, world):
+        print("\n=== Initializing Sensor Manager ===")
         self.vehicle = vehicle
         self.world = world
         self.actor_list = []
@@ -60,59 +62,105 @@ class SensorManager:
         self.imu_port = 12341  # New IMU port
         self.camera_port = 12342  # New camera port
 
+        # Sensor flags - set these to control which sensors are active
         self.lidar_flag = True
         self.radar_flag = True
         self.imu_flag = True
         self.camera_flag = False
+        
+        print(f"Initial sensor flags - LIDAR: {self.lidar_flag}, RADAR: {self.radar_flag}, IMU: {self.imu_flag}, CAMERA: {self.camera_flag}")
+        
         # Thread control
         self.running = True
         self.lidar_thread = None
         self.radar_thread = None
         self.imu_thread = None  # New IMU thread
         self.camera_thread = None  # New camera thread
+        
         # Setup separate sockets for each sensor
         self.setup_tcp_sockets()
         self.setup_sensors()
         
         # Start processing threads
         self.start_processing_threads()
+        print("=== Sensor Manager Initialization Complete ===\n")
         
     def setup_tcp_sockets(self):
         # LiDAR socket
         if self.lidar_flag:
-            self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("LiDAR TCP configured for {0}:{1}".format(self.host_ip, self.lidar_port))
+            try:
+                self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                print("LiDAR TCP configured for {0}:{1}".format(self.host_ip, self.lidar_port))
+                
+                # Try to connect but don't fail if connection fails
+                try:
+                    self.lidar_socket.connect((self.host_ip, self.lidar_port))
+                    print("LiDAR TCP connected")
+                except (ConnectionRefusedError, socket.error) as e:
+                    print(f"LiDAR TCP connection failed: {e}. Will continue with local data only.")
+                    # Don't disable the sensor just because connection failed
+            except Exception as e:
+                print(f"Error setting up LiDAR socket: {e}")
+                # Keep the flag enabled - we'll just use local data
         
         # Radar socket
         if self.radar_flag:
-            self.radar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("Radar TCP configured for {0}:{1}".format(self.host_ip, self.radar_port))
+            try:
+                self.radar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                print("Radar TCP configured for {0}:{1}".format(self.host_ip, self.radar_port))
+                
+                # Try to connect but don't fail if connection fails
+                try:
+                    self.radar_socket.connect((self.host_ip, self.radar_port))
+                    print("Radar TCP connected")
+                except (ConnectionRefusedError, socket.error) as e:
+                    print(f"Radar TCP connection failed: {e}. Will continue with local data only.")
+                    # Don't disable the sensor just because connection failed
+            except Exception as e:
+                print(f"Error setting up Radar socket: {e}")
+                # Keep the flag enabled - we'll just use local data
         
         # IMU socket
         if self.imu_flag:
-            self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("IMU TCP configured for {0}:{1}".format(self.host_ip, self.imu_port))
+            try:
+                self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                print("IMU TCP configured for {0}:{1}".format(self.host_ip, self.imu_port))
+                
+                # Try to connect but don't fail if connection fails
+                try:
+                    self.imu_socket.connect((self.host_ip, self.imu_port))
+                    print("IMU TCP connected")
+                except (ConnectionRefusedError, socket.error) as e:
+                    print(f"IMU TCP connection failed: {e}. Will continue with local data only.")
+                    # Don't disable the sensor just because connection failed
+            except Exception as e:
+                print(f"Error setting up IMU socket: {e}")
+                # Keep the flag enabled - we'll just use local data
         
         # Camera socket
         if self.camera_flag:
-            self.camera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.camera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.camera_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            print("Camera TCP configured for {0}:{1}".format(self.host_ip, self.camera_port))
-            
-            # Setup camera server to listen for connections
             try:
-                self.camera_socket.bind(('0.0.0.0', self.camera_port))
-                self.camera_socket.listen(1)
-                self.camera_socket.settimeout(0.5)  # Non-blocking accept
-                print("Camera TCP server listening on port {0}".format(self.camera_port))
-                self.camera_client = None
+                self.camera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.camera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.camera_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                print("Camera TCP configured for {0}:{1}".format(self.host_ip, self.camera_port))
+                
+                # Setup camera server to listen for connections
+                try:
+                    self.camera_socket.bind(('0.0.0.0', self.camera_port))
+                    self.camera_socket.listen(1)
+                    self.camera_socket.settimeout(0.5)  # Non-blocking accept
+                    print("Camera TCP server listening on port {0}".format(self.camera_port))
+                    self.camera_client = None
+                except Exception as e:
+                    print("Error setting up camera server: {0}".format(e))
+                    # Don't disable the sensor just because server setup failed
             except Exception as e:
-                print("Error setting up camera server: {0}".format(e))
-                self.camera_flag = False
+                print(f"Error setting up Camera socket: {e}")
+                # Keep the flag enabled if possible
         
     def start_processing_threads(self):
         if self.lidar_flag:
@@ -143,23 +191,38 @@ class SensorManager:
             self.camera_thread.start()
         
     def process_lidar_queue(self):
-        point_counter = 0  # Counter for debug output
+        point_counter = 0
         while self.running:
             try:
                 if not self.lidar_queue.empty():
                     point_cloud = self.lidar_queue.get()
-                    for point in point_cloud:
+                    
+                    # CARLA 0.9.12 LiDAR data structure:
+                    # LiDAR data is now stored in raw_data as a numpy array
+                    raw_data = np.frombuffer(point_cloud.raw_data, dtype=np.float32)
+                    
+                    # Reshape the array to get points (x, y, z, intensity)
+                    # The data comes as [x, y, z, intensity, x, y, z, intensity, ...]
+                    points = raw_data.reshape((-1, 4))
+                    
+                    for i in range(len(points)):
                         if not self.running:
                             break
+                        
+                        # Get x, y, z coordinates from the points array
+                        x = points[i][0]
+                        y = points[i][1]
+                        z = points[i][2]
                         
                         # Print debug info every 1000 points
                         point_counter += 1
                         if point_counter % 1000 == 0:
-                            print("Sending LIDAR point #{0}: ({1:.2f}, {2:.2f}, {3:.2f})".format(point_counter, point.x, point.y, point.z))
+                            print("Sending LIDAR point #{0}: ({1:.2f}, {2:.2f}, {3:.2f})".format(
+                                point_counter, x, y, z))
                         
                         # Convert to network byte order (big-endian)
                         # Pack as float32 values in network byte order
-                        point_data = struct.pack('!fff', point.x, point.y, point.z)
+                        point_data = struct.pack('!fff', x, y, z)
                         try:
                             if self.lidar_flag:
                                 self.lidar_socket.send(point_data)
@@ -170,7 +233,8 @@ class SensorManager:
                     time.sleep(0.001)  # Small sleep to prevent CPU hogging
             except Exception as e:
                 print("Error in LiDAR processing thread: {0}".format(e))
-                
+                traceback.print_exc()
+    
     def process_radar_queue(self):
         point_counter = 0  # Counter for radar points
         while self.running:
@@ -210,7 +274,6 @@ class SensorManager:
                     time.sleep(0.001)  # Small sleep to prevent CPU hogging
             except Exception as e:
                 print("[RADAR ERROR] Processing error: {}".format(e))
-                import traceback
                 traceback.print_exc()
     
     def process_imu_queue(self):
@@ -278,7 +341,6 @@ class SensorManager:
                     time.sleep(0.001)  # Small sleep to prevent CPU hogging
             except Exception as e:
                 print("Error in Camera processing thread: {0}".format(e))
-                import traceback
                 traceback.print_exc()
                 time.sleep(0.5)  # Sleep longer after an error
     
@@ -384,11 +446,33 @@ class SensorManager:
 
     def setup_sensors(self):
         try:
-            self.setup_lidar()
-            self.setup_radar()
-            self.setup_imu()
-            self.setup_camera()  # Add camera setup
+            print("\n=== Starting Sensor Setup ===")
+            if self.lidar_flag:
+                print("Setting up LIDAR sensor...")
+                self.setup_lidar()
+            else:
+                print("LIDAR sensor disabled, skipping setup")
+                
+            if self.radar_flag:
+                print("Setting up RADAR sensor...")
+                self.setup_radar()
+            else:
+                print("RADAR sensor disabled, skipping setup")
+                
+            if self.imu_flag:
+                print("Setting up IMU sensor...")
+                self.setup_imu()
+            else:
+                print("IMU sensor disabled, skipping setup")
+                
+            if self.camera_flag:
+                print("Setting up camera sensor...")
+                self.setup_camera()
+            else:
+                print("Camera sensor disabled, skipping setup")
+                
             print("Sensors setup complete")
+            print(f"Sensor flags after setup - LIDAR: {self.lidar_flag}, RADAR: {self.radar_flag}, IMU: {self.imu_flag}, CAMERA: {self.camera_flag}")
         except Exception as e:
             print("Error in setup_sensors: {0}".format(e))
             raise
@@ -405,7 +489,7 @@ class SensorManager:
             
             # Mount on top of the car, slightly forward
             lidar_transform = carla.Transform(
-                carla.Location(x=1.5, z=self.vehicle.get_transform().location.z),  # x: forward, z: up
+                carla.Location(x=1.5, z=2.0),  # x: forward, z: up (fixed height)
                 carla.Rotation()  # Default rotation (0,0,0) will inherit car's rotation
             )
             
@@ -414,14 +498,12 @@ class SensorManager:
             self.lidar.listen(self.lidar_callback)
             print("LiDAR sensor added")
             
-            # Connect LiDAR socket
-            if self.lidar_flag:
-                self.lidar_socket.connect((self.host_ip, self.lidar_port))
-                print("LiDAR TCP connected")
+            # Note: We don't try to connect here anymore, as it's handled in setup_tcp_sockets
             
         except Exception as e:
             print("Error in LiDAR setup: {0}".format(str(e)))
-            raise
+            # Don't raise the exception, just log it
+            # We'll keep the sensor flag enabled
         
     def setup_radar(self):
         try:
@@ -434,7 +516,7 @@ class SensorManager:
             # Mount next to the LiDAR with a slight horizontal offset
             radar_transform = carla.Transform(
                 # Position radar at the same x (forward) position as LiDAR but offset to the right (y=0.5)
-                carla.Location(x=1.5,y=0.5, z=self.vehicle.get_transform().location.z),
+                carla.Location(x=1.5, y=0.5, z=2.0),  # Fixed height
                 carla.Rotation()  # Default rotation (0,0,0) will inherit car's rotation
             )
             
@@ -443,14 +525,12 @@ class SensorManager:
             self.radar.listen(self.radar_callback)
             print("Radar sensor added")
             
-            # Connect Radar socket
-            if self.radar_flag:
-                self.radar_socket.connect((self.host_ip, self.radar_port))
-                print("Radar TCP connected")
+            # Note: We don't try to connect here anymore, as it's handled in setup_tcp_sockets
             
         except Exception as e:
             print("Error in Radar setup: {0}".format(str(e)))
-            raise
+            # Don't raise the exception, just log it
+            # We'll keep the sensor flag enabled
 
     def setup_imu(self):
         try:
@@ -470,14 +550,12 @@ class SensorManager:
             self.imu.listen(self.imu_callback)
             print("IMU sensor added")
             
-            # Connect IMU socket
-            if self.imu_flag:
-                self.imu_socket.connect((self.host_ip, self.imu_port))
-                print("IMU TCP connected")
+            # Note: We don't try to connect here anymore, as it's handled in setup_tcp_sockets
             
         except Exception as e:
             print("Error in IMU setup: {0}".format(str(e)))
-            raise
+            # Don't raise the exception, just log it
+            # We'll keep the sensor flag enabled
 
     def setup_camera(self):
         try:
@@ -519,8 +597,8 @@ class CarlaControl:
         try:
             print("Setting up Pygame...")
             self.setup_pygame()
-            print("Setting up CARLA client...")
             
+            print("Setting up CARLA client...")
             # Control variables
             self.throttle = 0.0
             self.brake = 0.0
@@ -529,58 +607,56 @@ class CarlaControl:
             self.vehicle = None
             self.running = True
             self.traffic_cars = []  # List to store traffic vehicles
-            self.setup_carla_client()
+            
+            # Initialize sensor manager and traffic manager references
             self.sensor_manager = None
-            self.traffic_manager = None  # Traffic manager reference
+            self.traffic_manager = None
+            
+            # Set up CARLA client and spawn vehicle
+            self.setup_carla_client()
+            
             print("CarlaControl initialization complete")
             
         except Exception as e:
             print("ERROR in CarlaControl initialization: {0}".format(str(e)))
             self.cleanup()
             raise
-        
+            
     def setup_pygame(self):
+        """Initialize pygame and create the control panel window"""
         try:
-            print("Initializing Pygame...")
             pygame.init()
-            self.WINDOW_WIDTH = 800
-            self.WINDOW_HEIGHT = 600
-            print("Creating Pygame window...")
-            self.screen = pygame.display.set_mode((self.WINDOW_WIDTH, self.WINDOW_HEIGHT))
+            pygame.font.init()
+            
+            # Set up display
+            self.display_width = 800
+            self.display_height = 600
+            self.display = pygame.display.set_mode((self.display_width, self.display_height))
             pygame.display.set_caption("CARLA Control Panel")
-            self.clock = pygame.time.Clock()
             
-            # Colors
-            self.WHITE = (255, 255, 255)
-            self.GREEN = (0, 255, 0)
-            self.RED = (255, 0, 0)
-            self.BLUE = (0, 0, 255)
-            self.GRAY = (128, 128, 128)
+            # Set up fonts
+            self.font = pygame.font.SysFont('Arial', 20)
+            self.small_font = pygame.font.SysFont('Arial', 16)
+            self.large_font = pygame.font.SysFont('Arial', 24)
+            self.title_font = pygame.font.SysFont('Arial', 30, True)  # Bold font for titles
+            
+            # Define colors
             self.BLACK = (0, 0, 0)
+            self.WHITE = (255, 255, 255)
+            self.GRAY = (100, 100, 100)
+            self.LIGHT_GRAY = (200, 200, 200)
+            self.RED = (255, 0, 0)
+            self.GREEN = (0, 255, 0)
+            self.BLUE = (0, 0, 255)
+            self.YELLOW = (255, 255, 0)
             
-            # Control panel positions
-            self.THROTTLE_POS = (50, 250)
-            self.BRAKE_POS = (150, 250)
-            self.STEER_POS = (250, 200)
-            self.BAR_WIDTH = 30
-            self.BAR_HEIGHT = 100
-            
-            # Initialize fonts
-            print("Setting up fonts...")
-            self.font = pygame.font.Font(None, 36)
-            self.small_font = pygame.font.Font(None, 24)
-            
-            # Draw initial screen
-            self.screen.fill(self.BLACK)
-            welcome_text = self.font.render("CARLA Control Panel", True, self.WHITE)
-            text_rect = welcome_text.get_rect(center=(self.WINDOW_WIDTH/2, self.WINDOW_HEIGHT/2))
-            self.screen.blit(welcome_text, text_rect)
-            pygame.display.flip()
+            # UI state
+            self.show_help = True  # Show help text by default
             
             print("Pygame setup complete")
             
         except Exception as e:
-            print("ERROR in Pygame setup: {0}".format(str(e)))
+            print("ERROR in pygame setup: {0}".format(str(e)))
             raise
         
     def setup_fonts(self):
@@ -635,9 +711,15 @@ class CarlaControl:
             print("Initializing sensor manager...")
             self.sensor_manager = SensorManager(self.vehicle, self.world)
             
+            if hasattr(self, 'sensor_manager'):
+                print("Sensor manager created successfully")
+                print(f"Sensor flags in manager - LIDAR: {self.sensor_manager.lidar_flag}, RADAR: {self.sensor_manager.radar_flag}, IMU: {self.sensor_manager.imu_flag}, CAMERA: {self.sensor_manager.camera_flag}")
+            else:
+                print("ERROR: Failed to create sensor manager!")
+            
             # Set up traffic manager after main vehicle is spawned
             print("Setting up traffic manager...")
-            self.traffic_manager = TrafficManager(self.world, self.vehicle)
+            self.traffic_manager = TrafficManager(self.world, self.vehicle, self.client)
             self.traffic_manager.spawn_traffic_vehicles(3)  # Spawn 3 traffic vehicles
             
             print("Vehicle setup complete")
@@ -646,197 +728,265 @@ class CarlaControl:
             print("ERROR in vehicle spawn: {0}".format(str(e)))
             raise
             
-    def process_input(self):
-        try:
-            print("\n=== Processing Input ===")
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    print("Quit event received")
-                    return False
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        print("Escape key pressed")
-                        return False
-                    elif event.key == pygame.K_r:
-                        self.reverse = not self.reverse
-                        print("REVERSE TOGGLED: {}".format(self.reverse))
-                    elif event.key == pygame.K_t:
-                        # Add more traffic vehicles when 'T' is pressed
-                        if self.traffic_manager:
-                            self.traffic_manager.spawn_traffic_vehicles(1)
-                            print("Added additional traffic vehicle")
-                    elif event.key == pygame.K_y:
-                        # Remove traffic vehicles when 'Y' is pressed
-                        if self.traffic_manager and self.traffic_manager.traffic_vehicles:
-                            self.traffic_manager.remove_last_vehicle()
-                            print("Removed last traffic vehicle")
-            
-            keys = pygame.key.get_pressed()
-            
-            # Throttle and Brake with smoother control
-            if keys[pygame.K_UP] or keys[pygame.K_w]:
-                self.throttle = min(2.0, self.throttle + 0.5)
-                self.brake = 0.0
-                print("THROTTLE UP: {:.2f}, BRAKE: {:.2f}, REVERSE: {}".format(
-                    self.throttle, self.brake, self.reverse))
-            elif keys[pygame.K_DOWN] or keys[pygame.K_s]:
-                self.brake = min(1.0, self.brake + 0.5)
-                self.throttle = 0.0
-                print("BRAKE UP: {:.2f}, THROTTLE: {:.2f}, REVERSE: {}".format(
-                    self.brake, self.throttle, self.reverse))
-            else:
-                self.throttle = max(0.0, self.throttle - 0.5)
-                self.brake = max(0.0, self.brake - 0.5)
-                print("COASTING - Throttle: {:.2f}, Brake: {:.2f}, REVERSE: {}".format(
-                    self.throttle, self.brake, self.reverse))
-            
-            # Steering with improved response
-            if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                self.steer = max(-1.0, self.steer - 0.15)
-                print("STEERING LEFT: {:.2f}".format(self.steer))
-            elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                self.steer = min(1.0, self.steer + 0.15)
-                print("STEERING RIGHT: {:.2f}".format(self.steer))
-            else:
-                self.steer = self.steer * 0.7
-                print("STEERING CENTER: {:.2f}".format(self.steer))
-                
-            # Apply control to vehicle
-            if self.vehicle:
-                try:
-                    control = carla.VehicleControl(
-                        throttle=self.throttle,
-                        steer=self.steer,
-                        brake=self.brake,
-                        hand_brake=keys[pygame.K_SPACE],
-                        reverse=self.reverse  # Add reverse state
-                    )
-                    
-                    print("Applying control to vehicle:")
-                    print("  - Throttle: {:.2f}".format(control.throttle))
-                    print("  - Brake: {:.2f}".format(control.brake))
-                    print("  - Steer: {:.2f}".format(control.steer))
-                    print("  - Handbrake: {}".format(control.hand_brake))
-                    print("  - Reverse: {}".format(control.reverse))
-                    
-                    if self.vehicle.is_alive:
-                        self.vehicle.apply_control(control)
-                    else:
-                        print("ERROR: Vehicle is not alive!")
-                        self.spawn_vehicle()
-                except Exception as e:
-                    print("ERROR applying vehicle control: {}".format(str(e)))
-                    
+    def process_input(self, event):
+        """Process input events"""
+        if event.type == pygame.QUIT:
             return True
+        
+        if event.type == pygame.KEYUP:
+            if event.key == pygame.K_ESCAPE:
+                return True
             
-        except Exception as e:
-            print("ERROR in process_input: {0}".format(str(e)))
-            return False
+            # Toggle sensors with number keys
+            elif event.key == pygame.K_1:
+                if self.sensor_manager:
+                    self.sensor_manager.toggle_lidar()
+                    print(f"LIDAR toggled: {self.sensor_manager.lidar_flag}")
+            elif event.key == pygame.K_2:
+                if self.sensor_manager:
+                    self.sensor_manager.toggle_radar()
+                    print(f"RADAR toggled: {self.sensor_manager.radar_flag}")
+            elif event.key == pygame.K_3:
+                if self.sensor_manager:
+                    self.sensor_manager.toggle_imu()
+                    print(f"IMU toggled: {self.sensor_manager.imu_flag}")
+            elif event.key == pygame.K_4:
+                if self.sensor_manager:
+                    self.sensor_manager.toggle_camera()
+                    print(f"Camera toggled: {self.sensor_manager.camera_flag}")
+            
+            # Reset vehicle controls when key is released
+            elif event.key == pygame.K_w or event.key == pygame.K_UP:
+                self.throttle = 0.0
+            elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
+                self.brake = 0.0
+            elif event.key == pygame.K_a or event.key == pygame.K_LEFT or event.key == pygame.K_d or event.key == pygame.K_RIGHT:
+                self.steer = 0.0
+            
+            # Toggle reverse with R key
+            elif event.key == pygame.K_r:
+                self.reverse = not self.reverse
+                print("Reverse:", self.reverse)
+            
+            # Traffic management keys
+            elif event.key == pygame.K_t:
+                # Add a single traffic vehicle
+                if self.traffic_manager:
+                    self.traffic_manager.spawn_traffic_vehicles(1)
+                    print("Added 1 traffic vehicle")
+            elif event.key == pygame.K_u:
+                # Add random traffic vehicles
+                if self.traffic_manager:
+                    self.traffic_manager.spawn_random_traffic_vehicles(3)
+                    print("Added 3 random traffic vehicles")
+            elif event.key == pygame.K_y:
+                # Remove last traffic vehicle
+                if self.traffic_manager and self.traffic_manager.remove_last_vehicle():
+                    print("Removed last traffic vehicle")
+            elif event.key == pygame.K_m:
+                # Toggle roaming mode for traffic vehicles
+                if self.traffic_manager:
+                    is_roaming = self.traffic_manager.set_vehicles_to_roam()
+                    print(f"Traffic vehicles roaming mode: {'ON' if is_roaming else 'OFF'}")
+            
+            # Help toggle
+            elif event.key == pygame.K_h:
+                self.show_help = not self.show_help
+                print("Help:", self.show_help)
+        
+        if event.type == pygame.KEYDOWN:
+            # Vehicle control with WASD or arrow keys
+            if event.key == pygame.K_w or event.key == pygame.K_UP:
+                self.throttle = min(1.0, self.throttle + 1.0)
+            elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
+                self.brake = min(1.0, self.brake + 1.0)
+            elif event.key == pygame.K_a or event.key == pygame.K_LEFT:
+                self.steer = max(-1.0, self.steer - 1.0)
+            elif event.key == pygame.K_d or event.key == pygame.K_RIGHT:
+                self.steer = min(1.0, self.steer + 1.0)
+        
+        return False
             
     def update_spectator(self):
+        """Update the spectator camera to follow the vehicle"""
         try:
-            if self.vehicle:
-                # Get vehicle transform
-                vehicle_transform = self.vehicle.get_transform()
+            if not self.vehicle or not self.vehicle.is_alive:
+                return
                 
-                # Calculate camera position behind and above vehicle
-                camera_offset = carla.Location(x=-8, z=4)  # 8 meters behind, 4 meters up
-                camera_location = vehicle_transform.transform(camera_offset)
-                
-                # Point camera at vehicle
-                camera_rotation = carla.Rotation(
-                    pitch=-15,  # Look down slightly
-                    yaw=vehicle_transform.rotation.yaw  # Match vehicle direction
-                )
-                
-                # Set spectator position and rotation
-                spectator = self.world.get_spectator()
-                spectator.set_transform(
-                    carla.Transform(camera_location, camera_rotation)
-                )
-                print("Spectator updated - Following vehicle from behind")
-                
+            # Get the vehicle's transform
+            vehicle_transform = self.vehicle.get_transform()
+            
+            # Calculate a position behind and above the vehicle
+            camera_offset = carla.Location(x=-5, z=3)  # 5 meters behind, 3 meters above
+            camera_location = vehicle_transform.transform(camera_offset)
+            
+            # Create a transform for the spectator
+            spectator_transform = carla.Transform(
+                camera_location,
+                carla.Rotation(pitch=-15, yaw=vehicle_transform.rotation.yaw)
+            )
+            
+            # Apply the transform to the spectator
+            spectator = self.world.get_spectator()
+            spectator.set_transform(spectator_transform)
+            
         except Exception as e:
-            print("ERROR in update_spectator: {0}".format(str(e)))
-        
+            print(f"ERROR in update_spectator: {e}")
+
     def draw_control_panel(self):
+        """Draw the control panel with vehicle controls and sensor status"""
         try:
             # Clear screen with black background
-            self.screen.fill((0, 0, 0))
+            self.display.fill(self.BLACK)
             
-            # Colors
-            WHITE = (255, 255, 255)
-            GREEN = (0, 255, 0)
-            RED = (255, 0, 0)
-            BLUE = (0, 0, 255)
-            GRAY = (128, 128, 128)
+            # Panel sections
+            PANEL_WIDTH = self.display_width
+            PANEL_HEIGHT = self.display_height
             
-            # Draw throttle bar
-            throttle_height = int(self.throttle * 100)
-            pygame.draw.rect(self.screen, GRAY, (50, 250, 30, -100))  # Background
-            pygame.draw.rect(self.screen, GREEN, (50, 250, 30, -throttle_height))
-            text = self.font.render("Throttle: {throttle:.2f}".format(throttle=self.throttle), True, WHITE)
-            self.screen.blit(text, (20, 260))
+            # Draw title and border
+            title = self.title_font.render("CARLA Sensor Control Panel", True, self.YELLOW)
+            title_rect = title.get_rect(center=(PANEL_WIDTH // 2, 20))
+            self.display.blit(title, title_rect)
+            pygame.draw.line(self.display, self.YELLOW, (20, 40), (PANEL_WIDTH - 20, 40), 2)
             
-            # Draw brake bar
-            brake_height = int(self.brake * 100)
-            pygame.draw.rect(self.screen, GRAY, (150, 250, 30, -100))  # Background
-            pygame.draw.rect(self.screen, RED, (150, 250, 30, -brake_height))
-            text = self.font.render("Brake: {brake:.2f}".format(brake=self.brake), True, WHITE)
-            self.screen.blit(text, (130, 260))
+            # Left panel - Sensor status
+            left_panel_x = 30
+            left_panel_y = 60
             
-            # Draw steering indicator
-            pygame.draw.rect(self.screen, GRAY, (250, 200, 100, 20))  # Steering background
-            steer_pos = 300 + (self.steer * 45)  # Convert -1:1 to pixel position
-            pygame.draw.circle(self.screen, BLUE, (int(steer_pos), 210), 10)
-            text = self.font.render("Steer: {steer:.2f}".format(steer=self.steer), True, WHITE)
-            self.screen.blit(text, (250, 260))
+            # Draw sensor status section title
+            sensor_title = self.large_font.render("Sensor Status", True, self.WHITE)
+            self.display.blit(sensor_title, (left_panel_x, left_panel_y))
+            left_panel_y += 40
             
-            # Draw sensor status
-            if hasattr(self, 'sensor_manager') and self.sensor_manager:
-                lidar_status = "LIDAR: Active" if not self.sensor_manager.lidar_queue.empty() else "LIDAR: Waiting"
-                radar_status = "RADAR: Active" if not self.sensor_manager.radar_queue.empty() else "RADAR: Waiting"
-                imu_status = "IMU: Active" if not self.sensor_manager.imu_queue.empty() else "IMU: Waiting"
-                camera_status = "CAMERA: Active" if not self.sensor_manager.camera_queue.empty() else "CAMERA: Waiting"
+            # Check if sensor manager exists
+            if self.sensor_manager:
+                # LIDAR status
+                lidar_status = "ON" if self.sensor_manager.lidar_flag else "OFF"
+                lidar_color = self.GREEN if self.sensor_manager.lidar_flag else self.RED
+                lidar_text = self.font.render(f"LIDAR: {lidar_status}", True, lidar_color)
+                self.display.blit(lidar_text, (left_panel_x, left_panel_y))
+                left_panel_y += 30
                 
-                text = self.small_font.render(lidar_status, True, GREEN if "Active" in lidar_status else RED)
-                self.screen.blit(text, (20, 20))
-                text = self.small_font.render(radar_status, True, GREEN if "Active" in radar_status else RED)
-                self.screen.blit(text, (20, 40))
-                text = self.small_font.render(imu_status, True, GREEN if "Active" in imu_status else RED)
-                self.screen.blit(text, (20, 60))
-                text = self.small_font.render(camera_status, True, GREEN if "Active" in camera_status else RED)
-                self.screen.blit(text, (20, 80))
+                # RADAR status
+                radar_status = "ON" if self.sensor_manager.radar_flag else "OFF"
+                radar_color = self.GREEN if self.sensor_manager.radar_flag else self.RED
+                radar_text = self.font.render(f"RADAR: {radar_status}", True, radar_color)
+                self.display.blit(radar_text, (left_panel_x, left_panel_y))
+                left_panel_y += 30
+                
+                # IMU status
+                imu_status = "ON" if self.sensor_manager.imu_flag else "OFF"
+                imu_color = self.GREEN if self.sensor_manager.imu_flag else self.RED
+                imu_text = self.font.render(f"IMU: {imu_status}", True, imu_color)
+                self.display.blit(imu_text, (left_panel_x, left_panel_y))
+                left_panel_y += 30
+                
+                # Camera status
+                camera_status = "ON" if self.sensor_manager.camera_flag else "OFF"
+                camera_color = self.GREEN if self.sensor_manager.camera_flag else self.RED
+                camera_text = self.font.render(f"Camera: {camera_status}", True, camera_color)
+                self.display.blit(camera_text, (left_panel_x, left_panel_y))
+                left_panel_y += 50
+            else:
+                no_sensors_text = self.font.render("No sensors available", True, self.RED)
+                self.display.blit(no_sensors_text, (left_panel_x, left_panel_y))
+                left_panel_y += 50
             
-            # Draw traffic vehicle status
+            # Traffic vehicle information
             if hasattr(self, 'traffic_manager') and self.traffic_manager:
-                traffic_count = len(self.traffic_manager.traffic_vehicles)
-                traffic_status = "Traffic Vehicles: {}".format(traffic_count)
-                text = self.small_font.render(traffic_status, True, BLUE)
-                self.screen.blit(text, (20, 100))
+                traffic_title = self.large_font.render("Traffic Vehicles", True, self.WHITE)
+                self.display.blit(traffic_title, (left_panel_x, left_panel_y))
+                left_panel_y += 40
+                
+                vehicle_count = len(self.traffic_manager.traffic_vehicles) if hasattr(self.traffic_manager, 'traffic_vehicles') else 0
+                traffic_text = self.font.render(f"Vehicles: {vehicle_count}", True, self.WHITE)
+                self.display.blit(traffic_text, (left_panel_x, left_panel_y))
+                left_panel_y += 30
+                
+                roaming_status = "ON" if hasattr(self.traffic_manager, 'roaming_mode') and self.traffic_manager.roaming_mode else "OFF"
+                roaming_color = self.GREEN if roaming_status == "ON" else self.GRAY
+                roaming_text = self.font.render(f"Roaming Mode: {roaming_status}", True, roaming_color)
+                self.display.blit(roaming_text, (left_panel_x, left_panel_y))
             
-            # Draw controls help
-            help_texts = [
-                "Controls:",
-                "W/UP: Accelerate",
-                "S/DOWN: Brake",
-                "A/LEFT: Turn Left",
-                "D/RIGHT: Turn Right",
-                "SPACE: Handbrake",
-                "R: Toggle Reverse",
-                "T: Add Traffic Vehicle",
-                "Y: Remove Traffic Vehicle",
-                "ESC: Quit"
-            ]
+            # Right panel - Vehicle controls
+            right_panel_x = PANEL_WIDTH // 2 + 30
+            right_panel_y = 60
             
-            for i, text in enumerate(help_texts):
-                help_surface = self.small_font.render(text, True, WHITE)
-                self.screen.blit(help_surface, (20, 140 + i * 20))  # Moved down to make room for camera status
+            # Draw controls section title
+            controls_title = self.large_font.render("Vehicle Controls", True, self.WHITE)
+            self.display.blit(controls_title, (right_panel_x, right_panel_y))
+            right_panel_y += 40
             
-            pygame.display.flip()
+            # Throttle indicator
+            throttle_text = self.font.render(f"Throttle: {self.throttle:.2f}", True, self.WHITE)
+            self.display.blit(throttle_text, (right_panel_x, right_panel_y))
+            pygame.draw.rect(self.display, self.GRAY, (right_panel_x + 150, right_panel_y, 100, 20), 1)
+            pygame.draw.rect(self.display, self.GREEN, (right_panel_x + 150, right_panel_y, int(self.throttle * 100), 20))
+            right_panel_y += 30
+            
+            # Brake indicator
+            brake_text = self.font.render(f"Brake: {self.brake:.2f}", True, self.WHITE)
+            self.display.blit(brake_text, (right_panel_x, right_panel_y))
+            pygame.draw.rect(self.display, self.GRAY, (right_panel_x + 150, right_panel_y, 100, 20), 1)
+            pygame.draw.rect(self.display, self.RED, (right_panel_x + 150, right_panel_y, int(self.brake * 100), 20))
+            right_panel_y += 30
+            
+            # Steering indicator
+            steer_text = self.font.render(f"Steering: {self.steer:.2f}", True, self.WHITE)
+            self.display.blit(steer_text, (right_panel_x, right_panel_y))
+            pygame.draw.rect(self.display, self.GRAY, (right_panel_x + 150, right_panel_y, 100, 20), 1)
+            steer_center = right_panel_x + 150 + 50
+            steer_pos = steer_center + int(self.steer * 50)
+            pygame.draw.rect(self.display, self.BLUE, (steer_pos - 5, right_panel_y, 10, 20))
+            pygame.draw.line(self.display, self.WHITE, (steer_center, right_panel_y), (steer_center, right_panel_y + 20), 1)
+            right_panel_y += 30
+            
+            # Reverse indicator
+            reverse_status = "ON" if self.reverse else "OFF"
+            reverse_color = self.RED if self.reverse else self.GRAY
+            reverse_text = self.font.render(f"Reverse: {reverse_status}", True, reverse_color)
+            self.display.blit(reverse_text, (right_panel_x, right_panel_y))
+            right_panel_y += 50
+            
+            # Help section
+            if self.show_help:
+                help_y = PANEL_HEIGHT - 180
+                help_title = self.large_font.render("Controls Help", True, self.WHITE)
+                self.display.blit(help_title, (30, help_y))
+                help_y += 30
+                
+                # Left column of help text
+                help_texts_left = [
+                    "W/Up: Accelerate",
+                    "S/Down: Brake",
+                    "A/Left: Steer Left",
+                    "D/Right: Steer Right",
+                    "R: Toggle Reverse",
+                    "ESC: Exit"
+                ]
+                
+                # Right column of help text
+                help_texts_right = [
+                    "1-4: Toggle Sensors",
+                    "T: Add Traffic Vehicle",
+                    "U: Add Random Traffic",
+                    "Y: Remove Traffic Vehicle",
+                    "M: Toggle Roaming Mode",
+                    "H: Toggle Help"
+                ]
+                
+                # Draw help text in two columns
+                for i, text in enumerate(help_texts_left):
+                    help_text = self.small_font.render(text, True, self.LIGHT_GRAY)
+                    self.display.blit(help_text, (30, help_y + i * 20))
+                    
+                for i, text in enumerate(help_texts_right):
+                    help_text = self.small_font.render(text, True, self.LIGHT_GRAY)
+                    self.display.blit(help_text, (PANEL_WIDTH // 2 + 30, help_y + i * 20))
             
         except Exception as e:
             print("ERROR in draw_control_panel: {0}".format(str(e)))
+            traceback.print_exc()
 
     def run(self):
         try:
@@ -850,27 +1000,54 @@ class CarlaControl:
             print("Entering main loop...")
             while self.running:
                 try:
-                    if not self.process_input():
-                        print("Process input returned False, breaking loop")
-                        break
+                    # Process events
+                    for event in pygame.event.get():
+                        if self.process_input(event):
+                            self.running = False
+                            break
                     
+                    # Tick the world
                     self.world.tick()
+                    
+                    # Update spectator camera
                     self.update_spectator()
+                    
+                    # Apply control to vehicle
+                    if self.vehicle and self.vehicle.is_alive:
+                        control = carla.VehicleControl(
+                            throttle=self.throttle,
+                            steer=self.steer,
+                            brake=self.brake,
+                            hand_brake=False,
+                            reverse=self.reverse
+                        )
+                        self.vehicle.apply_control(control)
+                    elif self.vehicle and not self.vehicle.is_alive:
+                        print("Vehicle is not alive, respawning...")
+                        self.spawn_vehicle()
+                    
+                    # Update display
                     self.draw_control_panel()
-                    self.clock.tick(20)
+                    pygame.display.flip()
+                    
+                    # Cap the frame rate
+                    pygame.time.Clock().tick(20)
                     
                 except Exception as e:
                     print("ERROR in main loop iteration: {0}".format(str(e)))
-                    break
-                    
+                    traceback.print_exc()
+            
+            print("Main loop ended")
+            
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received")
+            print("KeyboardInterrupt received")
         except Exception as e:
             print("ERROR in run method: {0}".format(str(e)))
+            traceback.print_exc()
         finally:
-            print("Initiating cleanup...")
+            print("Cleaning up...")
             self.cleanup()
-            
+
     def cleanup(self):
         print("\n=== Starting Cleanup ===")
         try:
@@ -903,88 +1080,232 @@ class CarlaControl:
             print("ERROR during cleanup: {0}".format(str(e)))
 
 class TrafficManager:
-    def __init__(self, world, ego_vehicle):
+    def __init__(self, world, ego_vehicle, client):
         self.world = world
+        self.client = client  # Get the client from the world
         self.ego_vehicle = ego_vehicle  # Main player vehicle
         self.traffic_vehicles = []  # List of spawned traffic vehicles
-        self.blueprint_library = self.world.get_blueprint_library()
-        self.spawn_points = self.world.get_map().get_spawn_points()
-        self.safety_distance = 20.0  # Distance in front of ego vehicle to start spawning traffic
-        print("Traffic Manager initialized")
+        self.roaming_mode = False  # Flag to track if vehicles are roaming
         
+        # Get traffic manager from client
+        try:
+            print("Initializing CARLA traffic manager...")
+            self.tm = self.client.get_trafficmanager(8000)
+            self.tm.set_global_distance_to_leading_vehicle(2.5)
+            self.tm.set_synchronous_mode(True)
+            self.tm.global_percentage_speed_difference(30.0)
+            print("Traffic manager initialized successfully")
+        except Exception as e:
+            print(f"Error initializing traffic manager: {e}")
+            self.tm = None
+            
     def spawn_traffic_vehicles(self, num_vehicles=3):
-        """Spawn a specified number of traffic vehicles in front of the ego vehicle"""
-        print("Spawning {} traffic vehicles...".format(num_vehicles))
-        
-        # Get ego vehicle transform
-        ego_transform = self.ego_vehicle.get_transform()
-        ego_location = ego_transform.location
-        ego_forward_vector = ego_transform.get_forward_vector()
-        
-        # Create a list of available vehicle blueprints (excluding bikes/motorcycles for stability)
-        vehicle_blueprints = [bp for bp in self.blueprint_library.filter('vehicle.*') 
-                            if int(bp.get_attribute('number_of_wheels')) >= 4]
-        
-        for i in range(num_vehicles):
-            # Calculate spawn position ahead of ego vehicle
-            # Each vehicle is placed further ahead than the previous one
-            distance = self.safety_distance + (i * 10) + (len(self.traffic_vehicles) * 10)  # Increasing distance
-            spawn_location = carla.Location(
-                x=ego_location.x + (ego_forward_vector.x * distance),
-                y=ego_location.y + (ego_forward_vector.y * distance),
-                z=ego_location.z + 0.5
-            )
-            
-            # Create the spawn transform at the calculated location
-            spawn_transform = carla.Transform()
-            spawn_transform.location = spawn_location
-            spawn_transform.rotation = ego_transform.rotation  # Same direction as ego vehicle
-            
-            # Randomly select a vehicle blueprint
-            bp = random.choice(vehicle_blueprints)
-            
-            # Try to spawn the vehicle
-            try:
-                vehicle = self.world.spawn_actor(bp, spawn_transform)
-                if vehicle:
-                    print("Spawned traffic vehicle {}: {}".format(len(self.traffic_vehicles)+1, bp.id))
-                    self.traffic_vehicles.append(vehicle)
-                    
-                    # Set it to autopilot using CARLA's traffic manager
-                    carla_tm = self.world.get_traffic_manager()
-                    vehicle.set_autopilot(True, carla_tm.get_port())
-                    
-                    # Configure traffic manager behavior for this vehicle
-                    carla_tm.ignore_lights_percentage(vehicle, 0)  # Obey traffic lights
-                    carla_tm.keep_right_rule_percentage(vehicle, 90)  # Mostly keep right
-                    carla_tm.distance_to_leading_vehicle(vehicle, 5.0)  # Follow distance
-                    carla_tm.vehicle_percentage_speed_difference(vehicle, -10)  # Slightly slower than limit
-            except Exception as e:
-                print("Failed to spawn traffic vehicle {}: {}".format(i+1, e))
-                
-        print("Successfully spawned {} traffic vehicles".format(len(self.traffic_vehicles)))
-        
-    def remove_last_vehicle(self):
-        """Remove the last traffic vehicle from the simulation"""
-        if not self.traffic_vehicles:
-            print("No traffic vehicles to remove")
+        """Spawn traffic vehicles in front of the ego vehicle"""
+        if not self.tm:
+            print("Traffic manager not available. Cannot spawn vehicles.")
             return
             
-        vehicle = self.traffic_vehicles.pop()
-        if vehicle and vehicle.is_alive:
-            vehicle.destroy()
-            print("Removed one traffic vehicle")
-            return True
+        try:
+            print(f"Spawning {num_vehicles} traffic vehicles...")
+            
+            # Get spawn points
+            spawn_points = self.world.get_map().get_spawn_points()
+            if not spawn_points:
+                print("No spawn points available")
+                return
+                
+            # Get ego vehicle transform
+            ego_transform = self.ego_vehicle.get_transform()
+            ego_location = ego_transform.location
+            ego_forward_vector = ego_transform.get_forward_vector()
+            
+            # Get vehicle blueprints
+            blueprint_library = self.world.get_blueprint_library()
+            car_blueprints = [bp for bp in blueprint_library.filter('vehicle.*') 
+                             if int(bp.get_attribute('number_of_wheels')) >= 4]  # Filter out bikes
+            
+            # Spawn vehicles in front of the ego vehicle
+            for i in range(num_vehicles):
+                # Calculate spawn distance (increasing for each vehicle)
+                spawn_distance = 20 + (i * 15)  # 20m, 35m, 50m, etc.
+                
+                # Calculate spawn location in front of ego vehicle
+                spawn_location = carla.Location(
+                    x=ego_location.x + ego_forward_vector.x * spawn_distance,
+                    y=ego_location.y + ego_forward_vector.y * spawn_distance,
+                    z=ego_location.z + 0.5
+                )
+                
+                # Find closest spawn point to desired location
+                closest_spawn_point = None
+                min_distance = float('inf')
+                for spawn_point in spawn_points:
+                    dist = spawn_location.distance(spawn_point.location)
+                    if dist < min_distance:
+                        min_distance = dist
+                        closest_spawn_point = spawn_point
+                
+                if not closest_spawn_point:
+                    print(f"Could not find a valid spawn point for vehicle {i+1}")
+                    continue
+                
+                # Choose a random blueprint
+                vehicle_bp = random.choice(car_blueprints)
+                
+                # Try to spawn the vehicle
+                try:
+                    vehicle = self.world.spawn_actor(vehicle_bp, closest_spawn_point)
+                    if vehicle:
+                        self.traffic_vehicles.append(vehicle)
+                        print(f"Spawned {vehicle.type_id} at {closest_spawn_point.location}")
+                        
+                        # Set up autopilot with traffic manager
+                        vehicle.set_autopilot(True, self.tm.get_port())
+                        self.tm.auto_lane_change(vehicle, True)
+                        self.tm.distance_to_leading_vehicle(vehicle, 5.0)
+                        self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-20, 10))
+                        self.tm.ignore_vehicles_percentage(vehicle, 0)
+                        self.tm.ignore_lights_percentage(vehicle, 0)
+                        self.tm.ignore_signs_percentage(vehicle, 0)
+                    else:
+                        print(f"Failed to spawn vehicle {i+1}")
+                except Exception as e:
+                    print(f"Error spawning vehicle {i+1}: {e}")
+            
+            print(f"Successfully spawned {len(self.traffic_vehicles)} traffic vehicles")
+            
+        except Exception as e:
+            print(f"Error in spawn_traffic_vehicles: {e}")
+            
+    def spawn_random_traffic_vehicles(self, num_vehicles=3):
+        """Spawn traffic vehicles at random locations on the map"""
+        if not self.tm:
+            print("Traffic manager not available. Cannot spawn vehicles.")
+            return
+            
+        try:
+            print(f"Spawning {num_vehicles} random traffic vehicles...")
+            
+            # Get spawn points
+            spawn_points = self.world.get_map().get_spawn_points()
+            if not spawn_points:
+                print("No spawn points available")
+                return
+                
+            # Get ego vehicle location
+            ego_location = self.ego_vehicle.get_transform().location
+            
+            # Get vehicle blueprints (excluding bikes and motorcycles for stability)
+            blueprint_library = self.world.get_blueprint_library()
+            car_blueprints = [bp for bp in blueprint_library.filter('vehicle.*') 
+                             if int(bp.get_attribute('number_of_wheels')) >= 4]
+            
+            # Filter spawn points that are at least 50m away from ego vehicle
+            valid_spawn_points = []
+            for sp in spawn_points:
+                if sp.location.distance(ego_location) >= 50.0:
+                    valid_spawn_points.append(sp)
+            
+            if not valid_spawn_points:
+                print("No valid spawn points found (at least 50m from player)")
+                return
+                
+            # Randomly select spawn points and spawn vehicles
+            spawned_count = 0
+            max_attempts = min(len(valid_spawn_points), num_vehicles * 3)  # Limit attempts
+            
+            for _ in range(max_attempts):
+                if spawned_count >= num_vehicles:
+                    break
+                    
+                # Choose a random spawn point and blueprint
+                spawn_point = random.choice(valid_spawn_points)
+                vehicle_bp = random.choice(car_blueprints)
+                
+                # Set autopilot attribute
+                if vehicle_bp.has_attribute('role_name'):
+                    vehicle_bp.set_attribute('role_name', 'autopilot')
+                
+                # Try to spawn the vehicle
+                try:
+                    vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+                    if vehicle:
+                        self.traffic_vehicles.append(vehicle)
+                        print(f"Spawned {vehicle.type_id} at {spawn_point.location}")
+                        spawned_count += 1
+                        
+                        # Set up autopilot with traffic manager
+                        if self.tm:
+                            vehicle.set_autopilot(True, self.tm.get_port())
+                            self.tm.auto_lane_change(vehicle, True)
+                            self.tm.distance_to_leading_vehicle(vehicle, random.uniform(1.0, 3.0))
+                            self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-20, 10))
+                            self.tm.ignore_vehicles_percentage(vehicle, 0)
+                            self.tm.ignore_lights_percentage(vehicle, 0)
+                            self.tm.ignore_signs_percentage(vehicle, 0)
+                except Exception as e:
+                    print(f"Failed to spawn vehicle: {e}")
+            
+            print(f"Successfully spawned {spawned_count} random traffic vehicles")
+            
+        except Exception as e:
+            print(f"Error in spawn_random_traffic_vehicles: {e}")
+    
+    def set_vehicles_to_roam(self):
+        """Toggle roaming mode for traffic vehicles"""
+        if not self.tm:
+            print("Traffic manager not available. Cannot set roaming mode.")
+            return
+            
+        try:
+            self.roaming_mode = not self.roaming_mode
+            
+            if self.roaming_mode:
+                print("Setting traffic vehicles to roam freely")
+                for vehicle in self.traffic_vehicles:
+                    if vehicle.is_alive:
+                        # Configure for free roaming
+                        self.tm.auto_lane_change(vehicle, True)
+                        self.tm.random_left_lanechange_percentage(vehicle, 10)
+                        self.tm.random_right_lanechange_percentage(vehicle, 10)
+                        self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-30, 10))
+                        self.tm.ignore_vehicles_percentage(vehicle, 0)
+                        self.tm.ignore_lights_percentage(vehicle, 0)
+                        self.tm.ignore_signs_percentage(vehicle, 0)
+            else:
+                print("Setting traffic vehicles to follow ego vehicle")
+                for vehicle in self.traffic_vehicles:
+                    if vehicle.is_alive:
+                        # Configure for following behavior
+                        self.tm.auto_lane_change(vehicle, False)
+                        self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-10, 5))
+                        self.tm.ignore_vehicles_percentage(vehicle, 0)
+                        self.tm.ignore_lights_percentage(vehicle, 0)
+                        self.tm.ignore_signs_percentage(vehicle, 0)
+                        
+            return self.roaming_mode
+            
+        except Exception as e:
+            print(f"Error setting vehicles to roam: {e}")
+            return self.roaming_mode
+            
+    def remove_last_vehicle(self):
+        """Remove the last spawned traffic vehicle"""
+        if self.traffic_vehicles:
+            vehicle = self.traffic_vehicles.pop()
+            if vehicle.is_alive:
+                vehicle.destroy()
+                print(f"Removed {vehicle.type_id}")
+                return True
         return False
         
     def cleanup(self):
-        """Destroy all spawned traffic vehicles"""
-        print("Cleaning up {} traffic vehicles...".format(len(self.traffic_vehicles)))
+        """Clean up all spawned traffic vehicles"""
+        print("Cleaning up traffic vehicles...")
         for vehicle in self.traffic_vehicles:
-            if vehicle is not None and vehicle.is_alive:
+            if vehicle and vehicle.is_alive:
                 vehicle.destroy()
-        self.traffic_vehicles.clear()
-        print("Traffic vehicles cleanup complete")
+        self.traffic_vehicles = []
 
 def main():
     try:
