@@ -942,8 +942,21 @@ class TrafficManager:
             
             # Get vehicle blueprints
             blueprint_library = self.world.get_blueprint_library()
-            car_blueprints = [bp for bp in blueprint_library.filter('vehicle.*') 
-                             if int(bp.get_attribute('number_of_wheels')) >= 4]  # Filter out bikes
+            
+            # Filter for only SUVs and large vehicles
+            suv_blueprints = []
+            for bp in blueprint_library.filter('vehicle.*'):
+                # Filter out bicycles and motorcycles
+                if int(bp.get_attribute('number_of_wheels').as_int()) >= 4:
+                    # Include only SUVs, trucks, vans, and other large vehicles
+                    if any(tag in bp.id.lower() for tag in ['suv', 'offroad', 'truck', 'van', 'jeep', 'rubicon', 'patrol', 'cybertruck']):
+                        suv_blueprints.append(bp)
+            
+            # If no SUVs were found, fallback to 4+ wheel vehicles
+            if not suv_blueprints:
+                print("No SUV blueprints found, falling back to 4+ wheel vehicles")
+                suv_blueprints = [bp for bp in blueprint_library.filter('vehicle.*') 
+                                if int(bp.get_attribute('number_of_wheels').as_int()) >= 4]
             
             # Spawn vehicles in front of the ego vehicle
             for i in range(num_vehicles):
@@ -970,8 +983,8 @@ class TrafficManager:
                     print("Could not find a valid spawn point for vehicle {}".format(i+1))
                     continue
                 
-                # Choose a random blueprint
-                vehicle_bp = random.choice(car_blueprints)
+                # Choose a random blueprint from SUVs
+                vehicle_bp = random.choice(suv_blueprints)
                 
                 # Try to spawn the vehicle
                 try:
@@ -1001,7 +1014,7 @@ class TrafficManager:
             
         except Exception as e:
             print("Error in spawn_traffic_vehicles: {}".format(e))
-            
+    
     def spawn_random_traffic_vehicles(self, num_vehicles=3):
         try:
             print("Spawning {} random traffic vehicles...".format(num_vehicles))
@@ -1015,8 +1028,19 @@ class TrafficManager:
             # Get all available vehicle blueprints
             blueprints = self.world.get_blueprint_library().filter('vehicle.*')
             
-            # Filter out bicycles and motorcycles (optional)
-            blueprints = [bp for bp in blueprints if int(bp.get_attribute('number_of_wheels').as_int()) >= 4]
+            # Filter for only SUVs and large vehicles
+            suv_blueprints = []
+            for bp in blueprints:
+                # Filter out bicycles and motorcycles
+                if int(bp.get_attribute('number_of_wheels').as_int()) >= 4:
+                    # Include only SUVs, trucks, vans, and other large vehicles
+                    if any(tag in bp.id.lower() for tag in ['suv', 'offroad', 'truck', 'van', 'jeep', 'rubicon', 'patrol', 'cybertruck']):
+                        suv_blueprints.append(bp)
+            
+            # If no SUVs were found, fallback to 4+ wheel vehicles
+            if not suv_blueprints:
+                print("No SUV blueprints found, falling back to 4+ wheel vehicles")
+                suv_blueprints = [bp for bp in blueprints if int(bp.get_attribute('number_of_wheels').as_int()) >= 4]
             
             # Get all spawn points
             spawn_points = self.world.get_map().get_spawn_points()
@@ -1034,8 +1058,8 @@ class TrafficManager:
                 if i >= len(spawn_points):
                     break  # No more spawn points available
                 
-                # Select a random blueprint
-                blueprint = random.choice(blueprints)
+                # Select a random blueprint from SUVs
+                blueprint = random.choice(suv_blueprints)
                 
                 # Try to spawn vehicle
                 try:
@@ -1073,7 +1097,7 @@ class TrafficManager:
                                 pass
                         
                         print("Spawned {} at {}".format(vehicle.type_id, spawn_point.location))
-            
+                
                 except Exception as e:
                     print("Failed to spawn vehicle: {}".format(e))
             
@@ -1407,7 +1431,48 @@ class CarlaControl:
             
             print("Setting up vehicle blueprint...")
             blueprint_library = self.world.get_blueprint_library()
-            vehicle_bp = blueprint_library.find('vehicle.tesla.model3')
+            
+            # Filter for only SUVs and large vehicles
+            suv_models = [
+                'vehicle.audi.etron',
+                'vehicle.chevrolet.blazer',
+                'vehicle.jeep.wrangler_rubicon',
+                'vehicle.lincoln.mkz2017',
+                'vehicle.mercedes.coupe',
+                'vehicle.mercedes.sprinter',
+                'vehicle.mini.cooper_s',
+                'vehicle.nissan.patrol',
+                'vehicle.tesla.cybertruck',
+                'vehicle.toyota.prius',
+                'vehicle.volkswagen.t2'
+            ]
+            
+            # Try to find one of the SUV models
+            vehicle_bp = None
+            for model in suv_models:
+                try:
+                    bp = blueprint_library.find(model)
+                    if bp:
+                        vehicle_bp = bp
+                        print(f"Selected SUV model: {model}")
+                        break
+                except:
+                    continue
+            
+            # If no specific SUV model was found, try a generic filter for SUVs
+            if not vehicle_bp:
+                suv_blueprints = []
+                for bp in blueprint_library.filter('vehicle'):
+                    if any(tag in bp.id for tag in ['suv', 'offroad', 'truck']):
+                        suv_blueprints.append(bp)
+                
+                if suv_blueprints:
+                    vehicle_bp = random.choice(suv_blueprints)
+                    print(f"Selected generic SUV model: {vehicle_bp.id}")
+                else:
+                    # Fallback to any vehicle if no SUVs are found
+                    vehicle_bp = blueprint_library.find('vehicle.tesla.cybertruck')
+                    print("No SUV models found, using fallback vehicle")
             
             print("Spawning vehicle actor...")
             self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
