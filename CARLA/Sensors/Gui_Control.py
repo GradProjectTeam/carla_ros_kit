@@ -638,7 +638,7 @@ class SensorManager:
             # Mount on top of the car, slightly forward
             lidar_transform = carla.Transform(
                 carla.Location(x=1.5, z=2.0),  # x: forward, z: up
-                carla.Rotation()  # Default rotation (0,0,0) will inherit car's rotation
+                carla.Rotation(yaw=270)  # Default rotation (0,0,0) will inherit car's rotation
             )
             
             self.lidar = self.world.spawn_actor(lidar_bp, lidar_transform, attach_to=self.vehicle)
