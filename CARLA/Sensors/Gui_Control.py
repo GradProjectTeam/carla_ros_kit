@@ -24,6 +24,7 @@ class CARLASetup:
     def __init__(self):
         print("Starting CARLA setup...")
         self.carla_path = '/home/shishtawy/Carla/CARLA_0.9.12/PythonAPI/carla/dist'
+        # self.carla_path = '/home/mostafa/ROS2andCarla/CARLA/CARLA_0.9.8/PythonAPI/carla/dist'
         self.setup_carla()
         
     def setup_carla(self):
