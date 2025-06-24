@@ -63,9 +63,9 @@ class SensorManager:
         self.camera_port = 12342  # New camera port
 
         # Sensor flags - set these to control which sensors are active
-        self.lidar_flag = True
-        self.radar_flag = True
-        self.imu_flag = True
+        self.lidar_flag = False
+        self.radar_flag = False
+        self.imu_flag = False
         self.camera_flag = False
         
         print(f"Initial sensor flags - LIDAR: {self.lidar_flag}, RADAR: {self.radar_flag}, IMU: {self.imu_flag}, CAMERA: {self.camera_flag}")
@@ -509,7 +509,7 @@ class SensorManager:
         try:
             radar_bp = self.world.get_blueprint_library().find('sensor.other.radar')
             radar_bp.set_attribute('horizontal_fov', '60.0')  # Increased from 30.0 for wider coverage
-            radar_bp.set_attribute('vertical_fov', '-60.0')    # Increased from 10.0 for better height detection
+            radar_bp.set_attribute('vertical_fov', '10.0')    # Increased from 10.0 for better height detection
             radar_bp.set_attribute('points_per_second', '2000')  # Increased from 1500 for better resolution
             radar_bp.set_attribute('range', '100.0')  # Increased from 50.0 for longer detection range
             
@@ -612,8 +612,17 @@ class CarlaControl:
             self.sensor_manager = None
             self.traffic_manager = None
             
+            # TCP control server variables
+            self.control_server_port = 12345
+            self.control_server_socket = None
+            self.control_client_socket = None
+            self.control_server_running = False
+            
             # Set up CARLA client and spawn vehicle
             self.setup_carla_client()
+            
+            # Set up TCP control server
+            self.setup_control_server()
             
             print("CarlaControl initialization complete")
             
@@ -1048,11 +1057,128 @@ class CarlaControl:
             print("Cleaning up...")
             self.cleanup()
 
+    def setup_control_server(self):
+        """Set up a TCP server to receive vehicle control commands"""
+        try:
+            import socket
+            import threading
+            
+            print("Setting up TCP control server on port {}...".format(self.control_server_port))
+            self.control_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.control_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.control_server_socket.bind(('0.0.0.0', self.control_server_port))
+            self.control_server_socket.listen(1)
+            self.control_server_running = True
+            
+            # Start a thread to accept connections
+            self.control_server_thread = threading.Thread(target=self.accept_control_connections)
+            self.control_server_thread.daemon = True
+            self.control_server_thread.start()
+            
+            print("TCP control server started")
+            
+        except Exception as e:
+            print("ERROR setting up TCP control server: {0}".format(str(e)))
+            self.control_server_running = False
+    
+    def accept_control_connections(self):
+        """Accept client connections for vehicle control"""
+        print("Waiting for control client connections...")
+        while self.control_server_running:
+            try:
+                # Set a timeout so we can check if we should still be running
+                self.control_server_socket.settimeout(1.0)
+                try:
+                    client_socket, client_address = self.control_server_socket.accept()
+                    print("Control client connected from {}".format(client_address))
+                    
+                    # Close previous client socket if exists
+                    if self.control_client_socket:
+                        self.control_client_socket.close()
+                        
+                    self.control_client_socket = client_socket
+                    
+                    # Start a thread to handle this client
+                    client_thread = threading.Thread(target=self.handle_control_client, args=(client_socket,))
+                    client_thread.daemon = True
+                    client_thread.start()
+                except socket.timeout:
+                    # This is expected due to the timeout
+                    continue
+                    
+            except Exception as e:
+                if self.control_server_running:  # Only print error if we're still supposed to be running
+                    print("ERROR accepting control connection: {0}".format(str(e)))
+                    traceback.print_exc()
+                time.sleep(1)  # Avoid tight loop if there's an error
+    
+    def handle_control_client(self, client_socket):
+        """Handle client connection and parse incoming control commands"""
+        try:
+            buffer = ""
+            while self.control_server_running:
+                data = client_socket.recv(1024)
+                if not data:
+                    print("Control client disconnected")
+                    break
+                    
+                # Decode and add to buffer
+                buffer += data.decode('utf-8')
+                
+                # Process complete commands (might receive multiple or partial commands)
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    self.parse_control_command(line.strip())
+                    
+        except Exception as e:
+            print("ERROR handling control client: {0}".format(str(e)))
+            traceback.print_exc()
+        finally:
+            client_socket.close()
+            if self.control_client_socket == client_socket:
+                self.control_client_socket = None
+    
+    def parse_control_command(self, command):
+        """Parse the command string in format 'throttle,steering,brake,reverse'"""
+        try:
+            parts = command.split(',')
+            if len(parts) >= 3:  # Accept both old and new format
+                self.throttle = float(parts[0])
+                self.steer = float(parts[1])
+                self.brake = float(parts[2])
+                
+                # Check if reverse flag is included (new format)
+                if len(parts) >= 4:
+                    self.reverse = bool(int(parts[3]))
+                
+                # Clamp values to valid ranges
+                self.throttle = max(0.0, min(1.0, self.throttle))
+                self.steer = max(-1.0, min(1.0, self.steer))
+                self.brake = max(0.0, min(1.0, self.brake))
+                
+                print("Received control: Throttle={:.2f}, Steering={:.2f}, Brake={:.2f}, Reverse={}".format(
+                    self.throttle, self.steer, self.brake, self.reverse))
+            else:
+                print("Invalid control command format: {}".format(command))
+                
+        except Exception as e:
+            print("ERROR parsing control command '{}': {}".format(command, str(e)))
+
     def cleanup(self):
         print("\n=== Starting Cleanup ===")
         try:
             print("Setting running flag to False...")
             self.running = False
+            self.control_server_running = False
+            
+            # Close control server sockets
+            if hasattr(self, 'control_client_socket') and self.control_client_socket:
+                print("Closing control client socket...")
+                self.control_client_socket.close()
+                
+            if hasattr(self, 'control_server_socket') and self.control_server_socket:
+                print("Closing control server socket...")
+                self.control_server_socket.close()
             
             if hasattr(self, 'sensor_manager') and self.sensor_manager:
                 print("Cleaning up sensor manager...")
