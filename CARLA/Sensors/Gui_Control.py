@@ -14,6 +14,7 @@ Project by: TechZ
 Version: 6.0 - Added traffic vehicles with autopilot in front of the main vehicle
 """
 
+
 import sys
 import glob
 import os
@@ -31,9 +32,44 @@ import threading  # For parallel processing
 from queue import Queue
 import traceback
 
-# Version 6: Added traffic vehicles in front of the main vehicle
-# The traffic vehicles have no sensors and use CARLA's autopilot system
-# The main vehicle remains user-controlled with sensors
+
+
+
+# Configuration Variables - Edit these to change simulation settings
+# -----------------------------------------------
+# TOWN_MAP: Select which CARLA town to load when starting the simulation
+# Available options:
+#   - 'Town01' to 'Town07': Standard maps
+#   - 'Town10HD': High-definition map
+#   - 'Town11': Rural environment
+#   - 'Town12': Under construction map
+# If an invalid map name is provided, the system will default to 'Town01'
+# To change the map, simply modify the value of TOWN_MAP below
+TOWN_MAP = 'Town04'  # Set this to change the map
+
+# WEATHER_PRESET: Select the weather condition for the simulation
+# Available options:
+#   - 'ClearNoon': Clear sky with noon sun
+#   - 'CloudyNoon': Cloudy sky with noon sun
+#   - 'WetNoon': Wet roads with noon sun
+#   - 'WetCloudyNoon': Wet roads with cloudy noon sky
+#   - 'MidRainyNoon': Medium rain with noon sun
+#   - 'HardRainNoon': Heavy rain with noon sun
+#   - 'SoftRainNoon': Light rain with noon sun
+#   - 'ClearSunset': Clear sky with sunset sun
+#   - 'CloudySunset': Cloudy sky with sunset sun
+#   - 'WetSunset': Wet roads with sunset sun
+#   - 'WetCloudySunset': Wet roads with cloudy sunset
+#   - 'MidRainSunset': Medium rain with sunset sun
+#   - 'HardRainSunset': Heavy rain with sunset sun
+#   - 'SoftRainSunset': Light rain with sunset sun
+# If an invalid weather preset is provided, the system will use 'ClearNoon'
+WEATHER_PRESET = 'ClearNoon'  # Set this to change the weather
+
+
+
+# Version 9: Added map & wheather control through a global configuration variable
+
 
 class CARLASetup:
     def __init__(self):
@@ -669,8 +705,8 @@ class SensorManager:
     def setup_radar(self):
         try:
             radar_bp = self.world.get_blueprint_library().find('sensor.other.radar')  # Get RADAR blueprint
-            radar_bp.set_attribute('horizontal_fov', '60.0')  # 60 degree horizontal FOV
-            radar_bp.set_attribute('vertical_fov', '-60.0')   # 60 degree vertical FOV
+            radar_bp.set_attribute('horizontal_fov', '15.0')  # 60 degree horizontal FOV
+            radar_bp.set_attribute('vertical_fov', '-15.0')   # 60 degree vertical FOV
             radar_bp.set_attribute('points_per_second', '2000')  # 2000 points per second
             radar_bp.set_attribute('range', '100.0')  # 100 meter range
             
@@ -1665,9 +1701,34 @@ class CarlaControl:
             print("Connecting to CARLA...")
             self.client = carla.Client('localhost', 2000)
             self.client.set_timeout(10.0)
+            
+            # Get available maps
+            available_maps = self.client.get_available_maps()
+            
+            # Validate the selected map
+            selected_map = None
+            for map_path in available_maps:
+                map_name = os.path.basename(map_path)
+                if TOWN_MAP in map_name:
+                    selected_map = map_path
+                    break
+            
+            # If selected map is valid, load it; otherwise, use default (Town01)
+            if selected_map:
+                print(f"Loading selected map: {TOWN_MAP}...")
+                self.client.load_world(TOWN_MAP)
+            else:
+                print(f"Warning: Map '{TOWN_MAP}' not found. Loading default map (Town01)...")
+                self.client.load_world('Town01')
+            
             print("Getting CARLA world...")
             self.world = self.client.get_world()
-            print("Connected to CARLA world")
+            current_map = os.path.basename(self.world.get_map().name)
+            print(f"Connected to CARLA world ({current_map})")
+            
+            # Apply weather settings
+            self.apply_weather_preset(WEATHER_PRESET)
+            
             print("Spawning vehicle...")
             self.spawn_vehicle()
         except Exception as e:
@@ -1775,6 +1836,39 @@ class CarlaControl:
         except Exception as e:
             print("ERROR in vehicle spawn: {}".format(str(e)))
             raise
+            
+    def apply_weather_preset(self, preset):
+        """Apply a predefined weather preset to the world"""
+        try:
+            # Dictionary of weather presets
+            weather_presets = {
+                'ClearNoon': carla.WeatherParameters.ClearNoon,
+                'CloudyNoon': carla.WeatherParameters.CloudyNoon,
+                'WetNoon': carla.WeatherParameters.WetNoon,
+                'WetCloudyNoon': carla.WeatherParameters.WetCloudyNoon,
+                'MidRainyNoon': carla.WeatherParameters.MidRainyNoon,
+                'HardRainNoon': carla.WeatherParameters.HardRainNoon,
+                'SoftRainNoon': carla.WeatherParameters.SoftRainNoon,
+                'ClearSunset': carla.WeatherParameters.ClearSunset,
+                'CloudySunset': carla.WeatherParameters.CloudySunset,
+                'WetSunset': carla.WeatherParameters.WetSunset,
+                'WetCloudySunset': carla.WeatherParameters.WetCloudySunset,
+                'MidRainSunset': carla.WeatherParameters.MidRainSunset,
+                'HardRainSunset': carla.WeatherParameters.HardRainSunset,
+                'SoftRainSunset': carla.WeatherParameters.SoftRainSunset,
+            }
+            
+            # Apply the selected weather preset or default to ClearNoon
+            if preset in weather_presets:
+                print(f"Applying weather preset: {preset}")
+                self.world.set_weather(weather_presets[preset])
+            else:
+                print(f"Warning: Weather preset '{preset}' not found. Using default (ClearNoon)...")
+                self.world.set_weather(carla.WeatherParameters.ClearNoon)
+                
+        except Exception as e:
+            print(f"Error applying weather preset: {e}")
+            print("Using default weather settings...")
             
     def process_input(self, event):
         """Process input events"""
