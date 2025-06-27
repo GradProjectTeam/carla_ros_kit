@@ -18,28 +18,17 @@ This project integrates CARLA simulator's sensors (LIDAR, RADAR, IMU, Camera) wi
 ```
 .
 ├── CARLA/
-│   ├── Sensors/
-│   │   ├── Gui_Control.py  # Main GUI control interface
-│   │   ├── IMU.py          # CARLA IMU sensor
-│   │   ├── Lidar.py        # CARLA LIDAR sensor
-│   │   └── Radar.py        # CARLA RADAR sensor
-│   └── scripts/            # Additional CARLA scripts
-├── my_python_pkg/          # ROS2 package
-│   ├── my_python_pkg/
-│   │   ├── __init__.py
-│   │   ├── imu_processor_node.py
-│   │   ├── lidar_processor_node.py
-│   │   ├── radar_processor_node.py
-│   │   ├── camera_processor_node.py
-│   │   └── waypoint_processor_node.py
-│   ├── resource/
-│   │   └── my_python_pkg   # Package resources
-│   ├── setup.py
-│   └── package.xml
-├── Assets/                 # Screenshots and other assets
-├── .gitignore              # Git ignore configuration
-├── RVIZ2.md                # RViz2 setup instructions
-└── readme.md               # This file
+│   └── Sensors/
+│       ├── Gui_Control.py          # Main GUI control interface
+│       ├── Camera.py               # CARLA camera sensor
+│       ├── vehicle_control_client.py # Client for vehicle control
+│       ├── vehicle_control_server.py # Server for vehicle control
+│       └── four_sensors_with_pygame.py # Combined sensors with pygame
+├── Assets/                         # Screenshots and other assets
+├── start_radar_visualization.sh    # Script to start radar visualization
+├── debug_radar_visualization.sh    # Script to debug radar visualization
+├── .gitignore                      # Git ignore configuration
+└── readme.md                       # This file
 ```
 
 ## Controls
@@ -116,13 +105,14 @@ tar -xf CARLA_0.9.12.tar.gz
 export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
 ```
 
-2. Setup ROS2 Package:
+2. Run the GUI Control Interface:
 ```bash
-# Build package
-colcon build --packages-select my_python_pkg
+# Set Python path for CARLA
+export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
 
-# Source workspace
-source install/setup.bash
+# Run GUI Control script
+cd CARLA/Sensors
+python3.7 Gui_Control.py
 ```
 
 ## Usage
@@ -141,21 +131,6 @@ export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7
 # Run GUI Control script
 cd CARLA/Sensors
 python3.7 Gui_Control.py
-```
-
-3. Start ROS2 Sensor Processors (Terminal 3):
-```bash
-# Source ROS2
-source /opt/ros/rolling/setup.bash
-source install/setup.bash
-
-# Run processor nodes
-ros2 launch my_python_pkg all_sensors.launch.py
-```
-
-4. Visualize in RViz2 (Terminal 4):
-```bash
-rviz2 -d config/sensors_config.rviz
 ```
 
 ## TCP Socket Communication
@@ -184,10 +159,10 @@ The system uses TCP sockets to bridge between CARLA and ROS2:
    - Check port availability
    - Verify network settings
 
-3. **"No sensors visible in RViz"**:
+3. **"No sensors visible"**:
    - Verify sensor is toggled ON in GUI
-   - Check ROS2 topic subscription
-   - Confirm frame_id settings
+   - Check TCP connection
+   - Confirm port settings
 
 ## Authors
 - Shishtawy
