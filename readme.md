@@ -1,53 +1,105 @@
-# CARLA ROS2 LIDAR Integration
+# CARLA ROS2 Sensor Integration Kit
 
-This project integrates CARLA simulator's LIDAR sensor with ROS2, using a socket connection to bridge between Python 3.5 (CARLA) and Python 3.12 (ROS2 Rolling).
+This project integrates CARLA simulator's sensors (LIDAR, RADAR, IMU, Camera) with ROS2, using TCP socket connections to bridge between the CARLA Python API and ROS2.
+
+![CARLA GUI Control Panel](Assets/Screenshot%20from%202025-06-28%2000-07-43.png)
+
+## Features
+
+- **Multi-Sensor Support**: LIDAR, RADAR, IMU, Camera, and Waypoint data
+- **Interactive GUI Control**: Real-time vehicle control with visual feedback
+- **Sensor Toggle System**: Enable/disable sensors on demand with keybindings
+- **Gradual Throttle Control**: Realistic acceleration and deceleration with smooth transitions
+- **Traffic Management**: Spawn and control AI traffic vehicles
+- **TCP Socket Communication**: Bridge between CARLA and ROS2
+- **Waypoint Navigation**: Generate and visualize waypoints for navigation assistance
 
 ## Project Structure
 ```
 .
 ├── CARLA/
 │   ├── Sensors/
-│   │   ├── IMU.py         # CARLA IMU sensor (Python 3.5)
-│   │   └── Lidar.py       # CARLA LIDAR sensor (Python 3.5)
-│   └── scripts/           # Additional CARLA scripts
-├── my_python_pkg/         # ROS2 package
+│   │   ├── Gui_Control.py  # Main GUI control interface
+│   │   ├── IMU.py          # CARLA IMU sensor
+│   │   ├── Lidar.py        # CARLA LIDAR sensor
+│   │   └── Radar.py        # CARLA RADAR sensor
+│   └── scripts/            # Additional CARLA scripts
+├── my_python_pkg/          # ROS2 package
 │   ├── my_python_pkg/
 │   │   ├── __init__.py
 │   │   ├── imu_processor_node.py
 │   │   ├── lidar_processor_node.py
-│   │   ├── pub_node.py
-│   │   └── sensor_reader_node.py
+│   │   ├── radar_processor_node.py
+│   │   ├── camera_processor_node.py
+│   │   └── waypoint_processor_node.py
 │   ├── resource/
-│   │   └── my_python_pkg  # Package resources
+│   │   └── my_python_pkg   # Package resources
 │   ├── setup.py
 │   └── package.xml
-├── .gitignore            # Git ignore configuration
-├── RVIZ2.md             # RViz2 setup instructions
-└── readme.md            # This file
+├── Assets/                 # Screenshots and other assets
+├── .gitignore              # Git ignore configuration
+├── RVIZ2.md                # RViz2 setup instructions
+└── readme.md               # This file
 ```
 
-## Ignored Directories and Files
-The following are necessary but not tracked in git:
-```
-build/                  # ROS2 build artifacts
-install/                # ROS2 install files
-log/                    # ROS2 log files
-CARLA/CARLA_0.9.8/     # CARLA simulator
-CARLA/*.egg            # CARLA Python APIs
-**/__pycache__/        # Python cache files
-```
+## Controls
+
+### Vehicle Control
+- **W/Up Arrow**: Accelerate forward (gradually increases throttle)
+- **S/Down Arrow**: Accelerate in reverse (gradually increases reverse throttle)
+- **A/Left Arrow**: Steer left
+- **D/Right Arrow**: Steer right
+- **Space**: Brake
+- **ESC**: Exit application
+
+### Sensor Toggle Controls
+- **1**: Toggle LIDAR sensor
+- **2**: Toggle RADAR sensor
+- **3**: Toggle IMU sensor
+- **4**: Toggle Camera sensor
+- **5**: Toggle Waypoint generation
+
+### Traffic Management
+- **T**: Add a traffic vehicle
+- **U**: Add random traffic vehicles
+- **Y**: Remove last traffic vehicle
+- **M**: Toggle roaming mode for traffic vehicles
+
+### UI Controls
+- **H**: Toggle help display
+
+## Advanced Features
+
+### Gradual Throttle Control
+The vehicle features realistic acceleration and deceleration:
+- Throttle gradually increases while acceleration key is held
+- Throttle gradually decreases when acceleration key is released
+- When changing direction (forward to reverse or vice versa), the vehicle first decelerates to a stop before accelerating in the new direction
+
+### Sensor Management
+Each sensor can be toggled independently:
+- When toggled on, the sensor is created and data transmission begins
+- When toggled off, the sensor is destroyed and data transmission stops
+- TCP sockets are created and managed automatically
+
+### Traffic Vehicle System
+The system can spawn and manage AI-controlled traffic vehicles:
+- Traffic vehicles use CARLA's autopilot system
+- Vehicles can be set to roam freely or follow specific paths
+- Traffic density can be adjusted by adding or removing vehicles
 
 ## Prerequisites
 
-### CARLA Environment (Python 3.5)
-- CARLA 0.9.8
-- Python 3.5.10 (included)
+### CARLA Environment
+- CARLA 0.9.12
+- Python 3.7+
 - numpy
+- pygame
 - socket
 
-### ROS2 Environment (Python 3.12)
-- ROS2 Rolling
-- Python 3.12
+### ROS2 Environment
+- ROS2 Rolling/Humble
+- Python 3.8+
 - numpy
 - sensor_msgs
 - rclpy
@@ -58,13 +110,10 @@ CARLA/*.egg            # CARLA Python APIs
 ```bash
 # Extract CARLA if not already done
 cd CARLA
-tar -xf CARLA_0.9.8.tar.gz
+tar -xf CARLA_0.9.12.tar.gz
 
-# Extract additional maps (optional)
-tar -xf AdditionalMaps_0.9.8.tar.gz
-
-# Install CARLA Python API
-export PYTHONPATH=$PYTHONPATH:$PWD/carla-0.9.8-py3.5-linux-x86_64.egg
+# Add CARLA Python API to PYTHONPATH
+export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
 ```
 
 2. Setup ROS2 Package:
@@ -80,97 +129,71 @@ source install/setup.bash
 
 1. Start CARLA (Terminal 1):
 ```bash
-cd CARLA/CARLA_0.9.8
+cd CARLA/CARLA_0.9.12
 ./CarlaUE4.sh
 ```
 
-2. Start LIDAR Sensor (Terminal 2):
+2. Start GUI Control Interface (Terminal 2):
 ```bash
 # Set Python path for CARLA
-export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/carla-0.9.8-py3.5-linux-x86_64.egg
+export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
 
-# Run LIDAR script
+# Run GUI Control script
 cd CARLA/Sensors
-python3.5 Lidar.py
+python3.7 Gui_Control.py
 ```
 
-3. Start ROS2 LIDAR Processor (Terminal 3):
+3. Start ROS2 Sensor Processors (Terminal 3):
 ```bash
 # Source ROS2
 source /opt/ros/rolling/setup.bash
 source install/setup.bash
 
-# Run processor node
-ros2 run my_python_pkg lidar_processor
+# Run processor nodes
+ros2 launch my_python_pkg all_sensors.launch.py
 ```
 
-4. Visualize (Terminal 4):
+4. Visualize in RViz2 (Terminal 4):
 ```bash
-rviz2
+rviz2 -d config/sensors_config.rviz
 ```
 
-## Socket Communication
+## TCP Socket Communication
 
-The system uses TCP sockets to bridge between Python versions:
+The system uses TCP sockets to bridge between CARLA and ROS2:
 
-### CARLA Side (Python 3.5)
-```python
-# Lidar.py
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server_socket.bind(('0.0.0.0', 12345))
-server_socket.listen(1)
-```
-
-### ROS2 Side (Python 3.12)
-```python
-# lidar_processor_node.py
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.connect(('localhost', 12345))
-```
+| Sensor  | Port  |
+|---------|-------|
+| LIDAR   | 12349 |
+| RADAR   | 12347 |
+| IMU     | 12341 |
+| Camera  | 12342 |
+| Waypoint| 12343 |
+| Control | 12344 |
 
 ## Troubleshooting
 
-### Python Path Issues
-```bash
-# Set PYTHONPATH for CARLA
-export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/carla-0.9.8-py3.5-linux-x86_64.egg
-
-# Check CARLA installation
-python3.5 -c "import carla; print(carla.__file__)"
-```
-
-### Socket Issues
-```bash
-# Check if port is in use
-sudo netstat -tulpn | grep 12345
-
-# Test socket connection
-nc -zv localhost 12345
-```
-
-### Common Problems
-1. "ImportError: No module named 'carla'":
+### Common Issues
+1. **"ImportError: No module named 'carla'"**:
    - Check PYTHONPATH setting
    - Verify carla egg file location
-   - Ensure using Python 3.5
+   - Ensure using compatible Python version
 
-2. "Connection refused":
+2. **"Connection refused"**:
    - Ensure CARLA script is running
-   - Check port 12345 is available
+   - Check port availability
    - Verify network settings
 
-3. "ROS2 package not found":
-   - Verify package is built
-   - Check source setup.bash
-   - Confirm package name
+3. **"No sensors visible in RViz"**:
+   - Verify sensor is toggled ON in GUI
+   - Check ROS2 topic subscription
+   - Confirm frame_id settings
 
-## Performance Notes
-- LIDAR data is transmitted via TCP socket
-- Processing is done on ROS2 side
-- Visualization through RViz2
-- Monitor system resources
+## Authors
+- Shishtawy
+- Hendy
 
-## Logs
-- ROS2 logs are stored in `log/` directory
-- Check CARLA output for simulator issues
-- Monitor socket communication errors
+## Project by: TechZ
+
+## License
+This project is licensed under the MIT License - see the LICENSE file for details.
