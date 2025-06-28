@@ -13,6 +13,7 @@ This project integrates CARLA simulator's sensors (LIDAR, RADAR, IMU, Camera) wi
 - **Traffic Management**: Spawn and control AI traffic vehicles
 - **TCP Socket Communication**: Bridge between CARLA and ROS2
 - **Waypoint Navigation**: Generate and visualize waypoints for navigation assistance
+- **Configurable Environment**: Easily change map and weather through configuration variables
 
 ## Project Structure
 ```
@@ -58,6 +59,23 @@ This project integrates CARLA simulator's sensors (LIDAR, RADAR, IMU, Camera) wi
 - **H**: Toggle help display
 
 ## Advanced Features
+
+### Configurable Environment
+The simulation environment can be easily configured by changing variables at the top of the `Gui_Control.py` file:
+
+#### Map Selection
+```python
+# Available options: 'Town01' to 'Town07', 'Town10HD', 'Town11', 'Town12'
+TOWN_MAP = 'Town04'  # Set this to change the map
+```
+
+#### Weather Presets
+```python
+# Available options include:
+# - Noon conditions: 'ClearNoon', 'CloudyNoon', 'WetNoon', 'WetCloudyNoon', etc.
+# - Sunset conditions: 'ClearSunset', 'CloudySunset', 'WetSunset', etc.
+WEATHER_PRESET = 'ClearNoon'  # Set this to change the weather
+```
 
 ### Gradual Throttle Control
 The vehicle features realistic acceleration and deceleration:
@@ -133,6 +151,18 @@ cd CARLA/Sensors
 python3.7 Gui_Control.py
 ```
 
+### Changing Maps and Weather
+
+To change the simulation environment:
+
+1. Open `Gui_Control.py` in a text editor
+2. Find the configuration variables at the top of the file
+3. Change `TOWN_MAP` to select a different map (e.g., 'Town01', 'Town04', 'Town10HD')
+4. Change `WEATHER_PRESET` to select different weather conditions (e.g., 'ClearNoon', 'RainyNoon', 'CloudySunset')
+5. Save the file and run the script
+
+The system will automatically load your selected map and apply the weather preset when started.
+
 ## TCP Socket Communication
 
 The system uses TCP sockets to bridge between CARLA and ROS2:
@@ -164,11 +194,17 @@ The system uses TCP sockets to bridge between CARLA and ROS2:
    - Check TCP connection
    - Confirm port settings
 
+4. **"Map or weather not changing"**:
+   - Verify you've edited the correct configuration variables
+   - Check for typos in map or weather preset names
+   - Ensure CARLA has the requested map installed
+
 ## Authors
 - Shishtawy
 - Hendy
 
-## Project by: TechZ
+## Project by:
+TechZ
 
 ## License
 This project is licensed under the MIT License - see the LICENSE file for details.
