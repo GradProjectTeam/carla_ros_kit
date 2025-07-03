@@ -27,6 +27,8 @@ CARLA/*
 !CARLA/scripts/
 !CARLA/scripts/*.py
 !CARLA/Sensors/*.py
+# Ignore specific files in Sensors directory
+CARLA/Sensors/backup.py
 
 # Still ignore Python cache files
 **/__pycache__/
