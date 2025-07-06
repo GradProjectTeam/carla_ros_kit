@@ -14,23 +14,23 @@ Project by: TechZ
 Version: 6.0 - Added traffic vehicles with autopilot in front of the main vehicle
 """
 
-
+# Import required libraries for simulation, networking, GUI and data processing
 import sys
 import glob
 import os
 import socket  # For TCP communication
-import pickle
-import numpy as np
+import pickle  # For data serialization
+import numpy as np  # For numerical operations
 import time
-import json
+import json  # For data formatting
 import struct  # For binary data packing
 import math
 import random
 import pygame  # For GUI interface
 from pygame.locals import *
 import threading  # For parallel processing
-from queue import Queue
-import traceback
+from queue import Queue  # For thread-safe data queues
+import traceback  # For error tracking
 
 
 
@@ -45,7 +45,7 @@ import traceback
 #   - 'Town12': Under construction map
 # If an invalid map name is provided, the system will default to 'Town01'
 # To change the map, simply modify the value of TOWN_MAP below
-TOWN_MAP = 'Town04'  # Set this to change the map
+TOWN_MAP = 'Town03'  # Default town map for simulation
 
 # WEATHER_PRESET: Select the weather condition for the simulation
 # Available options:
@@ -64,21 +64,21 @@ TOWN_MAP = 'Town04'  # Set this to change the map
 #   - 'HardRainSunset': Heavy rain with sunset sun
 #   - 'SoftRainSunset': Light rain with sunset sun
 # If an invalid weather preset is provided, the system will use 'ClearNoon'
-WEATHER_PRESET = 'ClearNoon'  # Set this to change the weather
+WEATHER_PRESET = 'ClearNoon'  # Default weather setting for simulation
 
 
 
 # Version 9: Added map & wheather control through a global configuration variable
 
 
-class CARLASetup:
+class CARLASetup:  # Class responsible for initializing CARLA environment and Python API
     def __init__(self):
         print("Starting CARLA setup...")
         self.carla_path = '/home/shishtawy/Carla/CARLA_0.9.12/PythonAPI/carla/dist'  # Path to CARLA Python API
         # self.carla_path = '/home/mostafa/ROS2andCarla/CARLA/CARLA_0.9.8/PythonAPI/carla/dist'
         self.setup_carla()
         
-    def setup_carla(self):
+    def setup_carla(self):  # Method to setup CARLA environment and import necessary modules
         print("Looking for CARLA at:", self.carla_path)
         carla_eggs = glob.glob('{0}/carla-*{1}.{2}-{3}.egg'.format(  # Find CARLA egg file for current Python version
             self.carla_path,
@@ -93,130 +93,120 @@ class CARLASetup:
         import carla # type: ignore  # Import CARLA module
         print("CARLA imported successfully")
 
-class SensorManager:
-    def __init__(self, vehicle, world):
+class SensorManager:  # Class managing all vehicle sensors and their data processing
+    def __init__(self, vehicle, world):  # Initialize sensor manager with vehicle and world objects
         print("\n=== Initializing Sensor Manager ===")
-        self.vehicle = vehicle  # Vehicle to attach sensors to
-        self.world = world  # CARLA world
-        self.actor_list = []  # List to keep track of all actors (sensors)
-        self.map = world.get_map()  # Get the map for waypoint generation
+        self.vehicle = vehicle  # Store reference to the vehicle
+        self.world = world  # Store reference to the CARLA world
+        self.actor_list = []  # List to track all sensor actors
+        self.map = world.get_map()  # Get current map for navigation
         
-        # Waypoint configuration
-        self.waypoint_distance = 2.0  # Distance between waypoints in meters
-        self.waypoints = []  # Store generated waypoints
+        # Waypoint configuration for navigation
+        self.waypoint_distance = 2.0  # Distance between consecutive waypoints
+        self.waypoints = []  # List to store generated waypoints
         
-        # Data queues with thread-safe implementation
-        self.lidar_queue = Queue(maxsize=1)  # Queue for LiDAR data
-        self.radar_queue = Queue(maxsize=1)  # Queue for RADAR data
-        self.imu_queue = Queue(maxsize=1)  # Queue for IMU data
-        self.camera_queue = Queue(maxsize=1)  # Queue for camera data
-        self.waypoint_queue = Queue(maxsize=1)  # Queue for waypoint data
+        # Thread-safe queues for sensor data
+        self.lidar_queue = Queue(maxsize=1)  # Queue for LiDAR point cloud data
+        self.radar_queue = Queue(maxsize=1)  # Queue for RADAR detection data
+        self.imu_queue = Queue(maxsize=1)  # Queue for IMU measurements
+        self.camera_queue = Queue(maxsize=1)  # Queue for camera images
+        self.waypoint_queue = Queue(maxsize=1)  # Queue for navigation waypoints
+        self.velocity_queue = Queue(maxsize=1)  # Queue for velocity data
         
-        # TCP setup with different ports
-        # self.host_ip = '192.168.1.2'
-        self.host_ip = '127.0.0.1'  # Localhost for TCP communication
-        self.lidar_port = 12349  # Port for LiDAR data
-        self.radar_port = 12347  # Port for RADAR data
-        self.imu_port = 12341  # Port for IMU data
-        self.camera_port = 12342  # Port for camera data
-        self.waypoint_port = 12343  # Port for waypoint data
+        # TCP network configuration
+        self.host_ip = '127.0.0.1'  # Local host IP for network communication
+        self.lidar_port = 12349  # Port for LiDAR data streaming
+        self.radar_port = 12347  # Port for RADAR data streaming
+        self.imu_port = 12341  # Port for IMU data streaming
+        self.camera_port = 12342  # Port for camera data streaming
+        self.waypoint_port = 12343  # Port for waypoint data streaming
+        self.velocity_port = 12346  # Port for velocity data streaming
 
-        # Sensor flags - set these to control which sensors are active
-        self.lidar_flag = True  # Enable/disable LiDAR
-        self.radar_flag = True  # Enable/disable RADAR
-        self.imu_flag = True  # Enable/disable IMU
-        self.camera_flag = False  # Enable/disable camera
-        self.waypoint_flag = True  # Enable/disable waypoint publishing
+        # Sensor activation flags
+        self.lidar_flag = True  # Toggle for LiDAR sensor
+        self.radar_flag = True  # Toggle for RADAR sensor
+        self.imu_flag = True  # Toggle for IMU sensor
+        self.camera_flag = False  # Toggle for camera sensor
+        self.waypoint_flag = True  # Toggle for waypoint generation
+        self.velocity_flag = True  # Toggle for velocity tracking
         
-        # Waypoint configuration
-        self.waypoint_distance = 2.0  # Distance between waypoints in meters
-        self.waypoint_lifetime = 0.5  # Lifetime of visualization in seconds
-        self.waypoints = []  # Store generated waypoints
+        # Additional waypoint settings
+        self.waypoint_distance = 2.0  # Spacing between waypoints
+        self.waypoint_lifetime = 0.5  # Duration waypoints remain visible
+        self.waypoints = []  # Storage for waypoint path
         
-        print("Initial sensor flags - LIDAR: {}, RADAR: {}, IMU: {}, CAMERA: {}, WAYPOINT: {}".format(
-            self.lidar_flag, self.radar_flag, self.imu_flag, self.camera_flag, self.waypoint_flag))
+        print("Initial sensor flags - LIDAR: {}, RADAR: {}, IMU: {}, CAMERA: {}, WAYPOINT: {}, VELOCITY: {}".format(
+            self.lidar_flag, self.radar_flag, self.imu_flag, self.camera_flag, self.waypoint_flag, self.velocity_flag))
         
-        # Thread control
-        self.running = True  # Flag to control thread execution
+        # Thread management
+        self.running = True  # Control flag for all threads
         self.lidar_thread = None  # Thread for LiDAR processing
         self.radar_thread = None  # Thread for RADAR processing
         self.imu_thread = None  # Thread for IMU processing
         self.camera_thread = None  # Thread for camera processing
         self.waypoint_thread = None  # Thread for waypoint processing
-        self.waypoint_generation_thread = None  # Thread for generating waypoints
+        self.waypoint_generation_thread = None  # Thread for waypoint generation
         
-        # Setup separate sockets for each sensor
-        self.setup_tcp_sockets()  # Initialize TCP connections
-        self.setup_sensors()  # Setup all sensors
-        
-        # Start processing threads
-        self.start_processing_threads()  # Start threads for data processing
+        # Initialize systems
+        self.setup_tcp_sockets()  # Setup network connections
+        self.setup_sensors()  # Initialize all sensors
+        self.start_processing_threads()  # Start data processing threads
         print("=== Sensor Manager Initialization Complete ===\n")
         
-    def setup_tcp_sockets(self):
-        # LiDAR socket
+    def setup_tcp_sockets(self):  # Method to initialize all TCP network connections
+        # LiDAR socket setup
         if self.lidar_flag:
             try:
-                self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket for LiDAR
+                self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                 print("LiDAR TCP configured for {0}:{1}".format(self.host_ip, self.lidar_port))
                 
-                # Try to connect but don't fail if connection fails
                 try:
                     self.lidar_socket.connect((self.host_ip, self.lidar_port))  # Connect to LiDAR server
                     print("LiDAR TCP connected")
                 except (ConnectionRefusedError, socket.error) as e:
                     print("LiDAR TCP connection failed: {}. Will continue with local data only.".format(e))
-                    # Don't disable the sensor just because connection failed
             except Exception as e:
                 print("Error setting up LiDAR socket: {}".format(e))
-                # Keep the flag enabled - we'll just use local data
         
-        # Radar socket
+        # Radar socket setup
         if self.radar_flag:
             try:
-                self.radar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                self.radar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket for RADAR
+                self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                 print("Radar TCP configured for {0}:{1}".format(self.host_ip, self.radar_port))
                 
-                # Try to connect but don't fail if connection fails
                 try:
                     self.radar_socket.connect((self.host_ip, self.radar_port))  # Connect to RADAR server
                     print("Radar TCP connected")
                 except (ConnectionRefusedError, socket.error) as e:
                     print("Radar TCP connection failed: {}. Will continue with local data only.".format(e))
-                    # Don't disable the sensor just because connection failed
             except Exception as e:
                 print("Error setting up Radar socket: {}".format(e))
-                # Keep the flag enabled - we'll just use local data
         
-        # IMU socket
+        # IMU socket setup
         if self.imu_flag:
             try:
-                self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket for IMU
+                self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                 print("IMU TCP configured for {0}:{1}".format(self.host_ip, self.imu_port))
                 
-                # Try to connect but don't fail if connection fails
                 try:
                     self.imu_socket.connect((self.host_ip, self.imu_port))  # Connect to IMU server
                     print("IMU TCP connected")
                 except (ConnectionRefusedError, socket.error) as e:
                     print("IMU TCP connection failed: {}. Will continue with local data only.".format(e))
-                    # Don't disable the sensor just because connection failed
             except Exception as e:
                 print("Error setting up IMU socket: {}".format(e))
-                # Keep the flag enabled - we'll just use local data
         
-        # Camera socket
+        # Camera socket setup
         if self.camera_flag:
             try:
-                self.camera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
+                self.camera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket for camera
                 self.camera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
-                self.camera_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                self.camera_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                 print("Camera TCP configured for {0}:{1}".format(self.host_ip, self.camera_port))
                 
-                # Setup camera server to listen for connections
                 try:
                     self.camera_socket.bind(('0.0.0.0', self.camera_port))  # Bind to all interfaces
                     self.camera_socket.listen(1)  # Listen for connections
@@ -230,74 +220,95 @@ class SensorManager:
                 print("Error setting up Camera socket: {}".format(e))
                 # Keep the flag enabled if possible
         
-        # Waypoint socket
+        # Waypoint socket setup
         if self.waypoint_flag:
             try:
-                self.waypoint_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                self.waypoint_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                self.waypoint_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket for waypoint
+                self.waypoint_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                 print("Waypoint TCP configured for {0}:{1}".format(self.host_ip, self.waypoint_port))
                 
-                # Try to connect but don't fail if connection fails
                 try:
                     self.waypoint_socket.connect((self.host_ip, self.waypoint_port))  # Connect to waypoint server
                     print("Waypoint TCP connected")
                 except (ConnectionRefusedError, socket.error) as e:
                     print("Waypoint TCP connection failed: {}. Will continue with local data only.".format(e))
-                    # Don't disable the sensor just because connection failed
             except Exception as e:
                 print("Error setting up Waypoint socket: {}".format(e))
-                # Keep the flag enabled - we'll just use local data
         
-    def start_processing_threads(self):
+        # Velocity socket setup
+        if self.velocity_flag:
+            try:
+                self.velocity_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.velocity_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                print("Velocity TCP configured for {0}:{1}".format(self.host_ip, self.velocity_port))   
+                
+                try:
+                    self.velocity_socket.connect((self.host_ip, self.velocity_port))
+                    print("Velocity TCP connected")
+                except (ConnectionRefusedError, socket.error) as e:
+                    print("Velocity TCP connection failed: {}. Will continue with local data only.".format(e))
+            except Exception as e:
+                print("Error setting up Velocity socket: {}".format(e))
+        
+    def start_processing_threads(self):  # Initialize and start all sensor data processing threads
+        # Create threads for each active sensor
         if self.lidar_flag:
-            self.lidar_thread = threading.Thread(target=self.process_lidar_queue)  # Create LiDAR processing thread
+            self.lidar_thread = threading.Thread(target=self.process_lidar_queue)  # Thread for processing LiDAR data
         if self.radar_flag:
-            self.radar_thread = threading.Thread(target=self.process_radar_queue)  # Create RADAR processing thread
+            self.radar_thread = threading.Thread(target=self.process_radar_queue)  # Thread for processing RADAR data
         if self.imu_flag:
-            self.imu_thread = threading.Thread(target=self.process_imu_queue)  # Create IMU processing thread
+            self.imu_thread = threading.Thread(target=self.process_imu_queue)  # Thread for processing IMU data
         if self.camera_flag:
-            self.camera_thread = threading.Thread(target=self.process_camera_queue)  # Create camera processing thread
+            self.camera_thread = threading.Thread(target=self.process_camera_queue)  # Thread for processing camera images
         if self.waypoint_flag:
-            self.waypoint_thread = threading.Thread(target=self.process_waypoint_queue)  # Create waypoint processing thread
-        
+            self.waypoint_thread = threading.Thread(target=self.process_waypoint_queue)  # Thread for processing navigation waypoints
+        if self.velocity_flag:
+            self.velocity_thread = threading.Thread(target=self.update_velocity)  # Thread for updating vehicle velocity
+
+        # Set all threads as daemon threads (will terminate when main program ends)
         if self.lidar_flag:
-            self.lidar_thread.daemon = True  # Set as daemon thread to exit when main thread exits
+            self.lidar_thread.daemon = True
         if self.radar_flag:
-            self.radar_thread.daemon = True  # Set as daemon thread
+            self.radar_thread.daemon = True
         if self.imu_flag:
-            self.imu_thread.daemon = True  # Set as daemon thread
+            self.imu_thread.daemon = True
         if self.camera_flag:
-            self.camera_thread.daemon = True  # Set as daemon thread
+            self.camera_thread.daemon = True
         if self.waypoint_flag:
-            self.waypoint_thread.daemon = True  # Set as daemon thread
-        
+            self.waypoint_thread.daemon = True
+        if self.velocity_flag:
+            self.velocity_thread.daemon = True
+
+        # Start all active sensor threads
         if self.lidar_flag:
-            self.lidar_thread.start()  # Start LiDAR processing thread
+            self.lidar_thread.start()
         if self.radar_flag:
-            self.radar_thread.start()  # Start RADAR processing thread
+            self.radar_thread.start()
         if self.imu_flag:
-            self.imu_thread.start()  # Start IMU processing thread
+            self.imu_thread.start()
         if self.camera_flag:
-            self.camera_thread.start()  # Start camera processing thread
+            self.camera_thread.start()
         if self.waypoint_flag:
-            self.waypoint_thread.start()  # Start waypoint processing thread
-        
-    def process_lidar_queue(self):
-        point_counter = 0  # Counter for debug output
+            self.waypoint_thread.start()
+        if self.velocity_flag:
+            self.velocity_thread.start()
+    
+    def process_lidar_queue(self):  # Process and transmit LiDAR point cloud data
+        point_counter = 0  # Counter for monitoring point processing progress
         while self.running:
             try:
                 if not self.lidar_queue.empty():
-                    point_cloud = self.lidar_queue.get()  # Get LiDAR data from queue
+                    point_cloud = self.lidar_queue.get()  # Retrieve point cloud data from queue
                     for point in point_cloud:
                         if not self.running:
                             break
                         
-                        # Print debug info every 1000 points
+                        # Print debug info periodically
                         point_counter += 1
-                        if point_counter % 1000 == 0:
-                            # Handle different LiDAR point formats
+                        if point_counter % 1000 == 0:  # Log every 1000th point for monitoring
+                            # Handle different LiDAR point formats based on CARLA version
                             if hasattr(point, 'x'):
-                                # Direct access for older CARLA versions
+                                # Direct coordinate access for older CARLA versions
                                 print("Sending LIDAR point #{0}: ({1:.2f}, {2:.2f}, {3:.2f})".format(
                                     point_counter, point.x, point.y, point.z))
                             elif hasattr(point, 'point'):
@@ -305,92 +316,86 @@ class SensorManager:
                                 print("Sending LIDAR point #{0}: ({1:.2f}, {2:.2f}, {3:.2f})".format(
                                     point_counter, point.point.x, point.point.y, point.point.z))
                             else:
-                                # Try to access as a tuple/list (some versions may use this format)
+                                # Array/tuple access for alternative formats
                                 print("Sending LIDAR point #{0}: ({1:.2f}, {2:.2f}, {3:.2f})".format(
                                     point_counter, point[0], point[1], point[2]))
                         
-                        # Convert to network byte order (big-endian)
-                        # Pack as float32 values in network byte order
+                        # Convert point data to network format
                         try:
-                            # Handle different LiDAR point formats
+                            # Handle different point formats and pack as network bytes
                             if hasattr(point, 'x'):
-                                # Direct access for older CARLA versions
-                                point_data = struct.pack('!fff', point.x, point.y, point.z)  # Pack as 3 floats
+                                point_data = struct.pack('!fff', point.x, point.y, point.z)  # Pack coordinates as 3 floats
                             elif hasattr(point, 'point'):
-                                # Access through point attribute for newer CARLA versions
-                                point_data = struct.pack('!fff', point.point.x, point.point.y, point.point.z)  # Pack as 3 floats
+                                point_data = struct.pack('!fff', point.point.x, point.point.y, point.point.z)  # Pack coordinates as 3 floats
                             else:
-                                # Try to access as a tuple/list (some versions may use this format)
-                                point_data = struct.pack('!fff', point[0], point[1], point[2])  # Pack as 3 floats
+                                point_data = struct.pack('!fff', point[0], point[1], point[2])  # Pack array coordinates as 3 floats
                                 
                             if self.lidar_flag:
-                                self.lidar_socket.send(point_data)  # Send point data over TCP
+                                self.lidar_socket.send(point_data)  # Transmit point data over TCP
                         except (AttributeError, IndexError, TypeError) as e:
-                            print(f"Error processing LiDAR point: {e}")
-                            print(f"Point type: {type(point)}, Point data: {point}")
-                            # Skip this point and continue with the next one
-                            continue
+                            print("Error processing LiDAR point: {0}".format(e))  # Log point processing errors
+                            print("Point type: {0}, Point data: {1}".format(type(point), point))
+                            continue  # Skip problematic points
                         except socket.error as e:
-                            print("LiDAR socket error: {0}".format(e))
+                            print("LiDAR socket error: {0}".format(e))  # Log network errors
                             break
                 else:
-                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
+                    time.sleep(0.001)  # Prevent CPU overuse when queue is empty
             except Exception as e:
-                print("Error in LiDAR processing thread: {0}".format(e))
+                print("Error in LiDAR processing thread: {0}".format(e))  # Log general processing errors
                 traceback.print_exc()
     
-    def process_radar_queue(self):
-        point_counter = 0  # Counter for radar points
+    def process_radar_queue(self):  # Process and transmit RADAR detection data
+        point_counter = 0  # Counter for monitoring RADAR detections
         while self.running:
             try:
                 if not self.radar_queue.empty():
-                    radar_data = self.radar_queue.get()  # Get RADAR data from queue
+                    radar_data = self.radar_queue.get()  # Retrieve RADAR data from queue
                     points = np.array([[det.altitude, det.azimuth, det.depth, det.velocity] 
-                                    for det in radar_data], dtype=np.float32)  # Convert to numpy array
+                                    for det in radar_data], dtype=np.float32)  # Convert detections to numpy array
                     
-                    # Only log every 50 points batch
+                    # Periodic logging for monitoring
                     if point_counter % 50 == 0:
                         print("[RADAR DEBUG] Processing batch of {} radar points".format(len(points)))
                     
-                    # Batch processing - send all points at once
+                    # Process and send data in batches for efficiency
                     if len(points) > 0 and self.radar_flag:
                         try:
-                            # First send the number of points in the batch
-                            num_points = struct.pack('!I', len(points))  # Pack as unsigned int
-                            self.radar_socket.sendall(num_points)  # Send number of points
+                            # Send batch size first
+                            num_points = struct.pack('!I', len(points))  # Pack point count as unsigned int
+                            self.radar_socket.sendall(num_points)  # Send batch size
                             
-                            # Then send all points data in one go
+                            # Prepare and send all points in one batch
                             batch_data = bytearray()
                             for point in points:
-                                # Pack each point
                                 point_data = struct.pack('!ffff', point[0], point[1], point[2], point[3])  # Pack as 4 floats
-                                batch_data.extend(point_data)  # Add to batch
+                                batch_data.extend(point_data)  # Add to batch buffer
                             
-                            # Send the entire batch at once
-                            self.radar_socket.sendall(batch_data)  # Send all points in one batch
+                            self.radar_socket.sendall(batch_data)  # Send complete batch
                             point_counter += len(points)
                             
+                            # Periodic progress logging
                             if point_counter % 50 == 0:
                                 print("[RADAR DEBUG] Sent batch of {} points, total: {}".format(len(points), point_counter))
                         except socket.error as e:
-                            print("[RADAR ERROR] Socket error in batch send: {}".format(e))
+                            print("[RADAR ERROR] Socket error in batch send: {}".format(e))  # Log network errors
                 else:
-                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
+                    time.sleep(0.001)  # Prevent CPU overuse when queue is empty
             except Exception as e:
-                print("[RADAR ERROR] Processing error: {}".format(e))
+                print("[RADAR ERROR] Processing error: {}".format(e))  # Log general processing errors
                 import traceback
                 traceback.print_exc()
     
-    def process_imu_queue(self):
+    def process_imu_queue(self):  # Process and transmit IMU sensor data
         while self.running:
             try:
                 if not self.imu_queue.empty():
-                    imu_data = self.imu_queue.get()  # Get IMU data from queue
-                    # Pack IMU data: acceleration (3 floats) + gyroscope (3 floats) + compass (1 float)
+                    imu_data = self.imu_queue.get()  # Retrieve IMU measurements from queue
+                    # Pack all IMU measurements (acceleration, gyroscope, compass) into a single packet
                     data = struct.pack('fffffff', 
-                                     imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z,
-                                     imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z,
-                                     imu_data.compass)  # Pack as 7 floats
+                                     imu_data.accelerometer.x, imu_data.accelerometer.y, imu_data.accelerometer.z,  # 3D acceleration
+                                     imu_data.gyroscope.x, imu_data.gyroscope.y, imu_data.gyroscope.z,  # 3D angular velocity
+                                     imu_data.compass)  # Magnetic heading
                     
                     try:
                         if self.imu_flag:
@@ -403,116 +408,187 @@ class SensorManager:
             except Exception as e:
                 print("Error in IMU processing thread: {0}".format(e))
     
-    def process_camera_queue(self):
-        frame_counter = 0  # Counter for camera frames
+    def process_camera_queue(self):  # Process and transmit camera image data
+        frame_counter = 0  # Counter for monitoring frame processing
         while self.running:
             try:
-                # Accept connections if no client is connected
+                # Handle client connections for camera streaming
                 if not hasattr(self, 'camera_client') or self.camera_client is None:
                     try:
-                        self.camera_client, addr = self.camera_socket.accept()  # Accept new connection
+                        self.camera_client, addr = self.camera_socket.accept()  # Wait for client connection
                         print("[CAMERA] Connected to client at {0}".format(addr))
                     except socket.timeout:
-                        # No connection yet, that's fine
+                        # No connection available, continue waiting
                         time.sleep(0.1)
                         continue
                     except Exception as e:
-                        print("[CAMERA] Connection error: {0}".format(e))
+                        print("[CAMERA] Connection error: {0}".format(e))  # Log connection errors
                         time.sleep(0.5)
                         continue
 
                 if not self.camera_queue.empty():
-                    camera_data = self.camera_queue.get()  # Get camera data from queue
+                    camera_data = self.camera_queue.get()  # Retrieve image from queue
                     
-                    # Get raw image data
-                    raw_data = camera_data.raw_data  # Get raw image bytes
+                    raw_data = camera_data.raw_data  # Extract raw image bytes
                     
-                    # Log frame info periodically
+                    # Periodic logging for monitoring
                     frame_counter += 1
-                    if frame_counter % 10 == 0:  # Log every 10 frames
+                    if frame_counter % 10 == 0:  # Log every 10th frame
                         print("[CAMERA DEBUG] Sending camera frame #{0}, size: {1} bytes".format(frame_counter, len(raw_data)))
                     
                     try:
                         if self.camera_flag and self.camera_client:
-                            # Send image size first
-                            size_header = struct.pack('!I', len(raw_data))  # Pack as unsigned int
-                            self.camera_client.sendall(size_header)  # Send size header
-                            # Send image data
-                            self.camera_client.sendall(raw_data)  # Send raw image data
+                            size_header = struct.pack('!I', len(raw_data))  # Pack image size as unsigned int
+                            self.camera_client.sendall(size_header)  # Send size header first
+                            self.camera_client.sendall(raw_data)  # Send image data
                     except (BrokenPipeError, ConnectionResetError, socket.error) as e:
-                        print("[CAMERA] Client disconnected: {0}".format(e))
+                        print("[CAMERA] Client disconnected: {0}".format(e))  # Log client disconnection
                         self.camera_client = None
                 else:
-                    time.sleep(0.001)  # Small sleep to prevent CPU hogging
+                    time.sleep(0.001)  # Prevent CPU overuse when queue is empty
             except Exception as e:
-                print("Error in Camera processing thread: {0}".format(e))
+                print("Error in Camera processing thread: {0}".format(e))  # Log general processing errors
                 import traceback
                 traceback.print_exc()
-                time.sleep(0.5)  # Sleep longer after an error
-    def lidar_callback(self, point_cloud):
+                time.sleep(0.5)  # Longer sleep after error to prevent rapid retries
+    
+    def update_velocity(self):  # Update and transmit vehicle velocity data
+        """Update and publish vehicle velocity data"""
+        reconnect_attempts = 0  # Counter for connection retry attempts
+        last_reconnect_time = 0  # Timestamp of last reconnection attempt
+        max_reconnect_attempts = 5  # Maximum number of reconnection attempts
+        reconnect_cooldown = 5  # Seconds between reconnection attempts
+        
+        while self.running:
+            try:
+                if self.vehicle and self.vehicle.is_alive:
+                    velocity = self.vehicle.get_velocity()  # Get current vehicle velocity
+                    
+                    # Update queue with latest velocity data
+                    if self.velocity_queue.full():
+                        try:
+                            self.velocity_queue.get_nowait()  # Remove old velocity data
+                        except Queue.Empty:
+                            pass
+                    self.velocity_queue.put(velocity)  # Add new velocity data
+                    
+                    # Process and transmit velocity data
+                    if not self.velocity_queue.empty():
+                        velocity_data = self.velocity_queue.get()  # Get velocity from queue
+                        try:
+                            if self.velocity_flag:
+                                # Pack velocity components into network packet
+                                data = struct.pack('!fff', 
+                                                 velocity_data.x,  # X component of velocity
+                                                 velocity_data.y,  # Y component of velocity
+                                                 velocity_data.z)  # Z component of velocity
+                                self.velocity_socket.sendall(data)  # Send velocity packet
+                                reconnect_attempts = 0  # Reset reconnection counter on success
+                        except (socket.error, AttributeError) as e:
+                            print("Velocity socket error: {}".format(e))  # Log network errors
+                            
+                            # Handle connection loss with reconnection logic
+                            current_time = time.time()
+                            if (current_time - last_reconnect_time > reconnect_cooldown and 
+                                reconnect_attempts < max_reconnect_attempts and 
+                                self.velocity_flag):
+                                
+                                print("Attempting to reconnect velocity socket (attempt {}/{})...".format(
+                                    reconnect_attempts + 1, max_reconnect_attempts))
+                                
+                                try:
+                                    # Clean up existing socket
+                                    if hasattr(self, 'velocity_socket'):
+                                        try:
+                                            self.velocity_socket.close()  # Close old socket
+                                        except:
+                                            pass
+                                    
+                                    # Create and configure new socket
+                                    self.velocity_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
+                                    self.velocity_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
+                                    self.velocity_socket.settimeout(2.0)  # Set connection timeout
+                                    
+                                    self.velocity_socket.connect((self.host_ip, self.velocity_port))  # Attempt reconnection
+                                    print("Velocity socket reconnected successfully")
+                                    
+                                    self.velocity_socket.settimeout(None)  # Reset to blocking mode
+                                except Exception as reconnect_error:
+                                    print("Failed to reconnect velocity socket: {}".format(reconnect_error))  # Log reconnection failure
+                                    reconnect_attempts += 1
+                                
+                                last_reconnect_time = current_time  # Update last attempt timestamp
+                            
+                time.sleep(0.05)  # 20Hz update rate
+                
+            except Exception as e:
+                print("Error in velocity update: {}".format(e))  # Log general processing errors
+                traceback.print_exc()
+                time.sleep(1.0)  # Longer sleep after error
+    
+    def lidar_callback(self, point_cloud):  # Callback for handling new LiDAR data
         try:
             if self.lidar_queue.full():
                 try:
-                    self.lidar_queue.get(block=False)  # Remove old data if queue is full
+                    self.lidar_queue.get(block=False)  # Remove oldest data if queue is full
                 except Queue.Empty:
                     pass
-            self.lidar_queue.put(point_cloud, block=False)  # Add new data to queue
+            self.lidar_queue.put(point_cloud, block=False)  # Add new point cloud to queue
         except Exception as e:
-            print("Error in LiDAR callback: {0}".format(e))
+            print("Error in LiDAR callback: {0}".format(e))  # Log callback errors
         
-    def radar_callback(self, radar_data):
+    def radar_callback(self, radar_data):  # Callback for handling new RADAR data
         try:
             if self.radar_queue.full():
                 try:
-                    self.radar_queue.get(block=False)  # Remove old data if queue is full
+                    self.radar_queue.get(block=False)  # Remove oldest data if queue is full
                 except Queue.Empty:
                     pass
-            self.radar_queue.put(radar_data, block=False)  # Add new data to queue
+            self.radar_queue.put(radar_data, block=False)  # Add new radar data to queue
         except Exception as e:
-            print("Error in Radar callback: {0}".format(e))
+            print("Error in Radar callback: {0}".format(e))  # Log callback errors
         
-    def imu_callback(self, imu_data):
+    def imu_callback(self, imu_data):  # Callback for handling new IMU data
         try:
             if self.imu_queue.full():
                 try:
-                    self.imu_queue.get(block=False)  # Remove old data if queue is full
+                    self.imu_queue.get(block=False)  # Remove oldest data if queue is full
                 except Queue.Empty:
                     pass
-            self.imu_queue.put(imu_data, block=False)  # Add new data to queue
+            self.imu_queue.put(imu_data, block=False)  # Add new IMU data to queue
         except Exception as e:
-            print("Error in IMU callback: {0}".format(e))
+            print("Error in IMU callback: {0}".format(e))  # Log callback errors
         
-    def camera_callback(self, image):
+    def camera_callback(self, image):  # Callback for handling new camera images
         try:
             if self.camera_queue.full():
                 try:
-                    self.camera_queue.get(block=False)  # Remove old data if queue is full
+                    self.camera_queue.get(block=False)  # Remove oldest image if queue is full
                 except Queue.Empty:
                     pass
-            self.camera_queue.put(image, block=False)  # Add new data to queue
+            self.camera_queue.put(image, block=False)  # Add new image to queue
         except Exception as e:
-            print("Error in Camera callback: {0}".format(e))
+            print("Error in Camera callback: {0}".format(e))  # Log callback errors
         
-    def generate_waypoints_ahead(self, distance=100.0, lane_change=False):
+    def generate_waypoints_ahead(self, distance=100.0, lane_change=False):  # Generate future path waypoints
         """Generate waypoints ahead of the vehicle in coordinates relative to the vehicle"""
         if not self.vehicle or not self.waypoint_flag:
             return []
             
-        # Get current vehicle location and transform
-        vehicle_transform = self.vehicle.get_transform()  # Get vehicle transform
-        vehicle_location = vehicle_transform.location  # Get vehicle location
+        # Get current vehicle pose
+        vehicle_transform = self.vehicle.get_transform()  # Get vehicle position and orientation
+        vehicle_location = vehicle_transform.location  # Extract vehicle position
         
-        # Find the closest waypoint to the vehicle
-        waypoint = self.map.get_waypoint(vehicle_location)  # Get closest waypoint
+        # Initialize waypoint generation
+        waypoint = self.map.get_waypoint(vehicle_location)  # Find closest road waypoint
         
-        # Generate waypoints ahead
-        absolute_waypoints = [waypoint]  # List of waypoints in world coordinates
-        relative_waypoints = []  # List of waypoints in vehicle coordinates
-        distance_covered = 0.0
+        # Setup waypoint containers
+        absolute_waypoints = [waypoint]  # Waypoints in world coordinates
+        relative_waypoints = []  # Waypoints in vehicle-relative coordinates
+        distance_covered = 0.0  # Track total path length
         
         while distance_covered < distance:
-            # Get next waypoints
-            next_waypoints = waypoint.next(self.waypoint_distance)  # Get next waypoints
+            next_waypoints = waypoint.next(self.waypoint_distance)  # Get next waypoints along road
             
             if not next_waypoints:
                 break
@@ -521,588 +597,616 @@ class SensorManager:
             distance_covered += self.waypoint_distance
             
             # Optional lane change logic
-            if lane_change and distance_covered > distance / 2 and random.random() > 0.8:
+            if lane_change and distance_covered > distance / 2 and random.random() > 0.8:  # Random lane changes after halfway
                 if waypoint.get_right_lane():
-                    waypoint = waypoint.get_right_lane()  # Change to right lane
+                    waypoint = waypoint.get_right_lane()  # Switch to right lane if available
                 elif waypoint.get_left_lane():
-                    waypoint = waypoint.get_left_lane()  # Change to left lane
+                    waypoint = waypoint.get_left_lane()  # Switch to left lane if right not available
             
-            absolute_waypoints.append(waypoint)
+            absolute_waypoints.append(waypoint)  # Add waypoint to world coordinate list
         
-        # Convert absolute waypoints to relative waypoints
+        # Transform waypoints from world to vehicle-relative coordinates
         for wp in absolute_waypoints:
-            # Get the waypoint's world location
-            wp_location = wp.transform.location
+            wp_location = wp.transform.location  # Get waypoint's world position
             
-            # Calculate relative coordinates
-            # First, get the vector from vehicle to waypoint in world coordinates
+            # Calculate vector from vehicle to waypoint in world frame
             relative_vector = carla.Location(
-                x=wp_location.x - vehicle_location.x,
-                y=wp_location.y - vehicle_location.y,
-                z=wp_location.z - vehicle_location.z
+                x=wp_location.x - vehicle_location.x,  # X displacement in world
+                y=wp_location.y - vehicle_location.y,  # Y displacement in world
+                z=wp_location.z - vehicle_location.z   # Z displacement in world
             )
             
-            # Convert to vehicle's local coordinate system
-            # We need to rotate the vector based on vehicle's rotation
-            # Forward is x, right is y in vehicle's local coordinates
-            yaw_rad = math.radians(vehicle_transform.rotation.yaw)  # Convert yaw to radians
-            cos_yaw = math.cos(yaw_rad)  # Cosine of yaw
-            sin_yaw = math.sin(yaw_rad)  # Sine of yaw
+            # Transform from world to vehicle-local coordinates
+            yaw_rad = math.radians(vehicle_transform.rotation.yaw)  # Vehicle heading in radians
+            cos_yaw = math.cos(yaw_rad)  # Precompute for efficiency
+            sin_yaw = math.sin(yaw_rad)  # Precompute for efficiency
             
-            # Apply rotation transformation
-            local_x = cos_yaw * relative_vector.x + sin_yaw * relative_vector.y  # Rotate x coordinate
-            local_y = -sin_yaw * relative_vector.x + cos_yaw * relative_vector.y  # Rotate y coordinate
-            local_z = relative_vector.z  # Z coordinate remains unchanged
+            # Apply 2D rotation matrix to transform coordinates
+            local_x = cos_yaw * relative_vector.x + sin_yaw * relative_vector.y  # Forward distance in vehicle frame
+            local_y = -sin_yaw * relative_vector.x + cos_yaw * relative_vector.y  # Lateral distance in vehicle frame
+            local_z = relative_vector.z  # Vertical distance remains unchanged
             
-            # Create a waypoint object with relative coordinates
+            # Check for available lanes
+            right_lane = wp.get_right_lane()  # Get adjacent right lane
+            has_right_lane = 0  # Flag for valid right lane
+            
+            if right_lane is not None:
+                # Verify right lane is drivable (not sidewalk, shoulder, or parking)
+                if (right_lane.lane_type != carla.LaneType.Sidewalk and 
+                    right_lane.lane_type != carla.LaneType.Shoulder and 
+                    right_lane.lane_type != carla.LaneType.Parking):
+                    has_right_lane = 1  # Mark as having valid right lane
+            
+            # Create waypoint dictionary with all relevant information
             relative_wp = {
-                'x': local_x,
-                'y': local_y,
-                'z': local_z,
-                'road_id': wp.road_id,  # Store road ID for navigation
-                'lane_id': wp.lane_id,  # Store lane ID for lane tracking
-                'lane_type': int(wp.lane_type)  # Store lane type for lane classification
+                'x': local_x,  # Forward distance in vehicle frame
+                'y': local_y,  # Lateral distance in vehicle frame
+                'z': local_z,  # Vertical distance in vehicle frame
+                'road_id': wp.road_id,  # Current road identifier
+                'lane_id': wp.lane_id,  # Current lane identifier
+                'lane_type': int(wp.lane_type),  # Type of current lane as integer value
+                'has_right_lane': has_right_lane  # Whether lane change right is possible
             }
             
-            relative_waypoints.append(relative_wp)
+            relative_waypoints.append(relative_wp)  # Add to vehicle-relative waypoint list
         
         print("Generated {} waypoints over {:.1f} meters (relative to vehicle)".format(len(relative_waypoints), distance_covered))
         return relative_waypoints
         
-    def process_waypoint_queue(self):
+    def process_waypoint_queue(self):  # Process and transmit waypoint data
         """Process waypoints from queue and update map"""
-        waypoint_counter = 0  # Counter for waypoints
+        waypoint_counter = 0  # Counter for monitoring waypoint processing
         while self.running:
             try:
-                # Generate new waypoints if needed
+                # Update waypoints periodically
                 if self.waypoint_flag and (not self.waypoints or waypoint_counter % 10 == 0):
-                    self.waypoints = self.generate_waypoints_ahead(distance=100.0)  # Generate 100m of waypoints ahead
+                    self.waypoints = self.generate_waypoints_ahead(distance=100.0)  # Generate new path
                     
-                    # Put waypoints in queue, replacing old data if queue is full
+                    # Update waypoint queue with new data
                     if self.waypoints:
                         if self.waypoint_queue.full():
                             try:
-                                self.waypoint_queue.get_nowait()  # Remove old waypoints
+                                self.waypoint_queue.get_nowait()  # Remove old path
                             except Queue.Empty:
                                 pass
-                        self.waypoint_queue.put(self.waypoints)  # Add new waypoints to queue
+                        self.waypoint_queue.put(self.waypoints)  # Add new path
                 
                 if not self.waypoint_queue.empty():
-                    waypoints = self.waypoint_queue.get()  # Get waypoints from queue
+                    waypoints = self.waypoint_queue.get()  # Get waypoints for processing
                     
-                    # Only log every 10 waypoint batches
+                    # Periodic logging for monitoring
                     waypoint_counter += 1
                     if waypoint_counter % 10 == 0:
                         print("[WAYPOINT DEBUG] Processing batch of {} waypoints".format(len(waypoints)))
                     
+                    # Process and transmit waypoints
                     if len(waypoints) > 0 and self.waypoint_flag:
                         try:
-                            # First send the number of waypoints in the batch
-                            num_waypoints = struct.pack('!I', len(waypoints))  # Pack as unsigned int
-                            self.waypoint_socket.sendall(num_waypoints)  # Send number of waypoints
+                            # Send batch size header
+                            num_waypoints = struct.pack('!I', len(waypoints))  # Pack count as unsigned int
+                            self.waypoint_socket.sendall(num_waypoints)  # Send waypoint count
                             
-                            # Then send all waypoint data in one go
+                            # Prepare complete batch of waypoint data
                             batch_data = bytearray()
                             for waypoint in waypoints:
-                                # Pack each waypoint with the new relative format
-                                # Format: x, y, z, road_id, lane_id, lane_type (as int)
-                                # Now using the dictionary format from generate_waypoints_ahead
-                                point_data = struct.pack('!fffiii', 
-                                                       waypoint['x'],  # Relative x
-                                                       waypoint['y'],  # Relative y
-                                                       waypoint['z'],  # Relative z
-                                                       waypoint['road_id'],  # Road ID
-                                                       waypoint['lane_id'],  # Lane ID
-                                                       waypoint['lane_type'])  # Lane type
-                                batch_data.extend(point_data)  # Add to batch
+                                # Pack waypoint data: position, road info, and lane info
+                                # Pack position and road info
+                                position_data = struct.pack('!fffiiii', 
+                                                       waypoint['x'],  # Forward distance
+                                                       waypoint['y'],  # Lateral distance
+                                                       waypoint['z'],  # Vertical distance
+                                                       waypoint['road_id'],  # Road identifier
+                                                       waypoint['lane_id'],  # Lane identifier
+                                                       self.get_current_lane_type(),  # Lane type as integer
+                                                       waypoint['has_right_lane'])  # Lane change possibility
+                                batch_data.extend(position_data)  # Add to batch buffer
                             
-                            # Send the entire batch at once
-                            self.waypoint_socket.sendall(batch_data)  # Send all waypoints in one batch
+                            self.waypoint_socket.sendall(batch_data)  # Send complete waypoint batch
                             
+                            # Periodic progress logging
                             if waypoint_counter % 10 == 0:
                                 print("[WAYPOINT DEBUG] Sent batch of {} relative waypoints".format(len(waypoints)))
                         except socket.error as e:
-                            print("[WAYPOINT ERROR] Socket error in batch send: {}".format(e))
+                            print("[WAYPOINT ERROR] Socket error in batch send: {}".format(e))  # Log network errors
                 else:
-                    time.sleep(0.1)  # Longer sleep for waypoints as they update less frequently
+                    time.sleep(0.1)  # Reduced update rate for waypoints
             except Exception as e:
-                print("[WAYPOINT ERROR] Processing error: {}".format(e))
+                print("[WAYPOINT ERROR] Processing error: {}".format(e))  # Log processing errors
                 import traceback
                 traceback.print_exc()
 
-    def generate_waypoints_periodically(self):
+    def generate_waypoints_periodically(self):  # Background thread for continuous path updates
         """Generate waypoints periodically in a separate thread"""
         while self.running and self.waypoint_flag:
             try:
-                # Generate waypoints with the new relative format
-                waypoints = self.generate_waypoints_ahead(distance=100.0)  # Generate 100m of waypoints
+                waypoints = self.generate_waypoints_ahead(distance=100.0)  # Generate 100m path ahead
                 
-                # Put waypoints in queue
+                # Update waypoint queue
                 if waypoints:
                     if self.waypoint_queue.full():
                         try:
-                            self.waypoint_queue.get_nowait()  # Remove old waypoints
+                            self.waypoint_queue.get_nowait()  # Remove old path
                         except Queue.Empty:
                             pass
-                    self.waypoint_queue.put(waypoints)  # Add new waypoints to queue
+                    self.waypoint_queue.put(waypoints)  # Add new path
                     
-                    # Log the first few waypoints to verify they're in relative format
+                    # Debug logging of first waypoint
                     if len(waypoints) > 0:
                         first_wp = waypoints[0]
                         print("First relative waypoint: x={:.2f}, y={:.2f}, z={:.2f}".format(
                             first_wp['x'], first_wp['y'], first_wp['z']))
                     
-                # Wait before generating new waypoints
-                time.sleep(1.0)  # Update every second
+                time.sleep(1.0)  # Update path every second
                 
             except Exception as e:
-                print("Error generating waypoints: {}".format(e))
-                time.sleep(2.0)  # Wait longer after an error
+                print("Error generating waypoints: {}".format(e))  # Log generation errors
+                time.sleep(2.0)  # Longer delay after error
 
-    def setup_sensors(self):
+    def setup_sensors(self):  # Initialize all enabled vehicle sensors
         try:
-            # Only setup sensors that are enabled by their flags
+            # Create only the sensors that are enabled
             if self.lidar_flag:
-                self.setup_lidar()  # Setup LiDAR sensor
+                self.setup_lidar()  # Initialize LiDAR sensor
             if self.radar_flag:
-                self.setup_radar()  # Setup RADAR sensor
+                self.setup_radar()  # Initialize RADAR sensor
             if self.imu_flag:
-                self.setup_imu()  # Setup IMU sensor
+                self.setup_imu()  # Initialize IMU sensor
             if self.camera_flag:
-                self.setup_camera()  # Setup camera sensor
+                self.setup_camera()  # Initialize camera sensor
             if self.waypoint_flag:
-                self.setup_waypoint()  # Setup waypoint generation
+                self.setup_waypoint()  # Initialize waypoint system
             print("Sensors setup complete")
         except Exception as e:
-            print("Error in setup_sensors: {0}".format(e))
+            print("Error in setup_sensors: {0}".format(e))  # Log setup errors
             raise
 
-    def setup_lidar(self):
+    def setup_lidar(self):  # Configure and spawn LiDAR sensor
         try:
-            lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')  # Get LiDAR blueprint
-            lidar_bp.set_attribute('channels', '32')  # 32 vertical channels
-            lidar_bp.set_attribute('points_per_second', '100000')  # 100k points per second
-            lidar_bp.set_attribute('rotation_frequency', '20')  # 20 Hz rotation
-            lidar_bp.set_attribute('range', '70.0')  # 70 meter range
-            lidar_bp.set_attribute('upper_fov', '10.0')  # 10 degrees up
-            lidar_bp.set_attribute('lower_fov', '-10.0')  # 10 degrees down
+            # Configure LiDAR sensor parameters
+            lidar_bp = self.world.get_blueprint_library().find('sensor.lidar.ray_cast')  # Get sensor blueprint
+            lidar_bp.set_attribute('channels', '32')  # Number of vertical lasers
+            lidar_bp.set_attribute('points_per_second', '100000')  # Scan density
+            lidar_bp.set_attribute('rotation_frequency', '20')  # Rotation speed
+            lidar_bp.set_attribute('range', '70.0')  # Maximum range
+            lidar_bp.set_attribute('upper_fov', '10.0')  # Upward scan angle
+            lidar_bp.set_attribute('lower_fov', '-2.0')  # Downward scan angle
             
-            # Mount on top of the car, slightly forward
+            # Define sensor mounting position on vehicle
             lidar_transform = carla.Transform(
-                carla.Location(x=1.5, z=2.0),  # x: forward, z: up
-                carla.Rotation(yaw=270)  # Default rotation (0,0,0) will inherit car's rotation
+                carla.Location(x=1.5, z=2.0),  # Mount forward and above vehicle
+                carla.Rotation(yaw=270)  # Orient sensor
             )
             
-            self.lidar = self.world.spawn_actor(lidar_bp, lidar_transform, attach_to=self.vehicle)  # Spawn LiDAR
-            self.actor_list.append(self.lidar)  # Add to actor list for cleanup
-            self.lidar.listen(self.lidar_callback)  # Register callback function
+            # Create and attach sensor to vehicle
+            self.lidar = self.world.spawn_actor(lidar_bp, lidar_transform, attach_to=self.vehicle)  # Spawn sensor
+            self.actor_list.append(self.lidar)  # Track for cleanup
+            self.lidar.listen(self.lidar_callback)  # Start data collection
             print("LiDAR sensor added at position: x=1.5m, z=2.0m")
             
         except Exception as e:
-            print("Error in LiDAR setup: {0}".format(str(e)))
+            print("Error in LiDAR setup: {0}".format(str(e)))  # Log setup errors
             raise
         
-    def setup_radar(self):
+    def setup_radar(self):  # Configure and spawn RADAR sensor
         try:
-            radar_bp = self.world.get_blueprint_library().find('sensor.other.radar')  # Get RADAR blueprint
-            radar_bp.set_attribute('horizontal_fov', '15.0')  # 60 degree horizontal FOV
-            radar_bp.set_attribute('vertical_fov', '-15.0')   # 60 degree vertical FOV
-            radar_bp.set_attribute('points_per_second', '2000')  # 2000 points per second
-            radar_bp.set_attribute('range', '100.0')  # 100 meter range
+            # Configure RADAR sensor parameters
+            radar_bp = self.world.get_blueprint_library().find('sensor.other.radar')  # Get sensor blueprint
+            radar_bp.set_attribute('horizontal_fov', '15.0')  # Horizontal scan angle
+            radar_bp.set_attribute('vertical_fov', '-15.0')   # Vertical scan angle
+            radar_bp.set_attribute('points_per_second', '2000')  # Scan density
+            radar_bp.set_attribute('range', '100.0')  # Maximum range
             
             # Mount next to the LiDAR with a slight horizontal offset
-            radar_transform = carla.Transform(
+            radar_transform = carla.Transform(  # Define RADAR mounting position
                 # Position radar at the same x (forward) position as LiDAR but offset to the right (y=0.5)
-                carla.Location(x=1.5, y=0.5, z=2.0),  # x: forward, y: right, z: up
-                carla.Rotation()  # Default rotation (0,0,0) will inherit car's rotation
+                carla.Location(x=1.5, y=0.5, z=2.0),  # Mount forward, right, and up from vehicle center
+                carla.Rotation()  # Use vehicle's orientation
             )
             
-            self.radar = self.world.spawn_actor(radar_bp, radar_transform, attach_to=self.vehicle)  # Spawn RADAR
-            self.actor_list.append(self.radar)  # Add to actor list for cleanup
-            self.radar.listen(self.radar_callback)  # Register callback function
+            # Create and attach sensor to vehicle
+            self.radar = self.world.spawn_actor(radar_bp, radar_transform, attach_to=self.vehicle)  # Spawn sensor
+            self.actor_list.append(self.radar)  # Track for cleanup
+            self.radar.listen(self.radar_callback)  # Start data collection
             print("Radar sensor added at position: x=1.5m, y=0.5m, z=2.0m")
             
         except Exception as e:
-            print("Error in Radar setup: {0}".format(str(e)))
+            print("Error in Radar setup: {0}".format(str(e)))  # Log setup errors
             raise
 
-    def setup_imu(self):
+    def setup_imu(self):  # Configure and spawn IMU sensor
         try:
-            imu_bp = self.world.get_blueprint_library().find('sensor.other.imu')  # Get IMU blueprint
+            # Configure IMU sensor parameters
+            imu_bp = self.world.get_blueprint_library().find('sensor.other.imu')  # Get sensor blueprint
+            imu_bp.set_attribute('sensor_tick', '0.05')  # Set 20Hz update rate
             
-            # Set IMU parameters
-            imu_bp.set_attribute('sensor_tick', '0.05')  # 20Hz update rate
-            
-            # Mount at the center of the car
+            # Define sensor mounting position
             imu_transform = carla.Transform(
-                carla.Location(x=0.0, z=0.0),  # Center of the vehicle
-                carla.Rotation()  # Default rotation
+                carla.Location(x=0.0, z=0.0),  # Mount at vehicle's center of mass
+                carla.Rotation()  # Use vehicle's orientation
             )
             
-            self.imu = self.world.spawn_actor(imu_bp, imu_transform, attach_to=self.vehicle)  # Spawn IMU
-            self.actor_list.append(self.imu)  # Add to actor list for cleanup
-            self.imu.listen(self.imu_callback)  # Register callback function
+            # Create and attach sensor to vehicle
+            self.imu = self.world.spawn_actor(imu_bp, imu_transform, attach_to=self.vehicle)  # Spawn sensor
+            self.actor_list.append(self.imu)  # Track for cleanup
+            self.imu.listen(self.imu_callback)  # Start data collection
             print("IMU sensor added at position: x=0.0m, z=0.0m")
             
         except Exception as e:
-            print("Error in IMU setup: {0}".format(str(e)))
+            print("Error in IMU setup: {0}".format(str(e)))  # Log setup errors
             raise
 
-    def setup_camera(self):
+    def setup_camera(self):  # Configure and spawn camera sensor
         try:
-            # Create camera blueprint
+            # Configure camera sensor parameters
             camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')  # Get RGB camera blueprint
+            camera_bp.set_attribute('image_size_x', '640')  # Set image width
+            camera_bp.set_attribute('image_size_y', '480')  # Set image height
+            camera_bp.set_attribute('fov', '90')  # Set horizontal field of view
+            camera_bp.set_attribute('sensor_tick', '0.1')  # Set 10Hz capture rate
             
-            # Set camera attributes for better image quality
-            camera_bp.set_attribute('image_size_x', '640')  # 640 pixels width
-            camera_bp.set_attribute('image_size_y', '480')  # 480 pixels height
-            camera_bp.set_attribute('fov', '90')  # 90 degree field of view
-            camera_bp.set_attribute('sensor_tick', '0.1')  # 10 FPS
-            
-            # Mount on front of the car, slightly elevated and tilted down for lane detection
+            # Define sensor mounting position
             camera_transform = carla.Transform(
-                carla.Location(x=2.0, z=1.5),  # Front of car, slightly elevated
-                carla.Rotation(pitch=-15.0)    # Tilted down slightly
+                carla.Location(x=2.0, z=1.5),  # Mount forward and up from vehicle center
+                carla.Rotation(pitch=-15.0)    # Tilt down for better road view
             )
             
-            self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle)  # Spawn camera
-            self.actor_list.append(self.camera)  # Add to actor list for cleanup
-            self.camera.listen(self.camera_callback)  # Register callback function
+            # Create and attach sensor to vehicle
+            self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.vehicle)  # Spawn sensor
+            self.actor_list.append(self.camera)  # Track for cleanup
+            self.camera.listen(self.camera_callback)  # Start data collection
             print("Camera sensor added at position: x=2.0m, z=1.5m, pitch=-15°")
             
         except Exception as e:
-            print("Error in Camera setup: {0}".format(e))
+            print("Error in Camera setup: {0}".format(e))  # Log setup errors
             raise
 
-    def setup_waypoint(self):
+    def setup_waypoint(self):  # Initialize waypoint generation system
         try:
             print("Setting up waypoint generation...")
             
-            # No need for a physical sensor, we'll generate waypoints using the map API
+            # Initialize waypoint generation (no physical sensor needed)
             
-            # Start a thread for periodic waypoint generation if waypoint flag is enabled
+            # Start background waypoint generation if enabled
             if self.waypoint_flag:
-                # Generate initial waypoints
+                # Generate initial path
                 try:
-                    initial_waypoints = self.generate_waypoints_ahead(distance=100.0)  # Generate initial waypoints
+                    initial_waypoints = self.generate_waypoints_ahead(distance=100.0)  # Create initial path
                     if initial_waypoints:
-                        self.waypoints = initial_waypoints  # Store waypoints
+                        self.waypoints = initial_waypoints  # Store current path
                         if self.waypoint_queue.full():
                             try:
-                                self.waypoint_queue.get_nowait()  # Remove old waypoints if queue is full
+                                self.waypoint_queue.get_nowait()  # Remove old path
                             except Queue.Empty:
                                 pass
-                        self.waypoint_queue.put(initial_waypoints)  # Add waypoints to queue
+                        self.waypoint_queue.put(initial_waypoints)  # Queue new path
                         print("Initial waypoints generated: {} (relative to vehicle)".format(len(initial_waypoints)))
                         
-                        # Log the first waypoint to verify it's in relative format
+                        # Verify first waypoint format
                         if len(initial_waypoints) > 0:
                             first_wp = initial_waypoints[0]
                             print("First relative waypoint: x={:.2f}, y={:.2f}, z={:.2f}".format(
                                 first_wp['x'], first_wp['y'], first_wp['z']))
                         
-                        # Start a thread for periodic waypoint generation
-                        self.waypoint_generation_thread = threading.Thread(target=self.generate_waypoints_periodically)  # Create thread
-                        self.waypoint_generation_thread.daemon = True  # Set as daemon thread
-                        self.waypoint_generation_thread.start()  # Start thread
+                        # Start continuous path generation thread
+                        self.waypoint_generation_thread = threading.Thread(target=self.generate_waypoints_periodically)  # Create updater thread
+                        self.waypoint_generation_thread.daemon = True  # Set as background thread
+                        self.waypoint_generation_thread.start()  # Begin updates
                         print("Waypoint generation thread started")
                 except Exception as e:
-                    print("Error generating initial waypoints: {}".format(e))
+                    print("Error generating initial waypoints: {}".format(e))  # Log generation errors
             
             print("Waypoint generation setup complete")
             
         except Exception as e:
-            print("Error in Waypoint setup: {0}".format(e))
+            print("Error in Waypoint setup: {0}".format(e))  # Log setup errors
             raise
 
-    def toggle_waypoint(self):
+    def toggle_waypoint(self):  # Enable/disable waypoint generation
         """Toggle the waypoint sensor on/off"""
-        self.waypoint_flag = not self.waypoint_flag  # Toggle flag
+        self.waypoint_flag = not self.waypoint_flag  # Switch state
         print("Waypoint sensor toggled: {}".format(self.waypoint_flag))
         
-        # If turned on, try to set up the socket if it doesn't exist
+        # Initialize network connection when enabled
         if self.waypoint_flag and not hasattr(self, 'waypoint_socket'):
             try:
                 self.waypoint_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                self.waypoint_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                self.waypoint_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                 try:
-                    self.waypoint_socket.connect((self.host_ip, self.waypoint_port))  # Connect to waypoint server
+                    self.waypoint_socket.connect((self.host_ip, self.waypoint_port))  # Connect to server
                     print("Waypoint TCP connected")
                 except (ConnectionRefusedError, socket.error) as e:
                     print("Waypoint TCP connection failed: {}. Will continue with local data only.".format(e))
             except Exception as e:
-                print("Error setting up waypoint socket: {}".format(e))
+                print("Error setting up waypoint socket: {}".format(e))  # Log network errors
         
-        # If turned on, generate new waypoints
+        # Initialize path generation when enabled
         if self.waypoint_flag:
             try:
-                # Generate initial waypoints with the new relative format
-                initial_waypoints = self.generate_waypoints_ahead(distance=100.0)  # Generate waypoints
+                # Generate initial path in vehicle-relative coordinates
+                initial_waypoints = self.generate_waypoints_ahead(distance=100.0)  # Create initial path
                 if initial_waypoints:
-                    self.waypoints = initial_waypoints  # Store waypoints
+                    self.waypoints = initial_waypoints  # Store current path
                     if self.waypoint_queue.full():
                         try:
-                            self.waypoint_queue.get_nowait()  # Remove old waypoints if queue is full
+                            self.waypoint_queue.get_nowait()  # Remove old path
                         except Queue.Empty:
                             pass
-                    self.waypoint_queue.put(initial_waypoints)  # Add waypoints to queue
+                    self.waypoint_queue.put(initial_waypoints)  # Queue new path
                     print("Generated {} relative waypoints when toggling on".format(len(initial_waypoints)))
                     
-                    # Log the first waypoint to verify it's in relative format
+                    # Verify waypoint format
                     if len(initial_waypoints) > 0:
                         first_wp = initial_waypoints[0]
                         print("First relative waypoint: x={:.2f}, y={:.2f}, z={:.2f}".format(
                             first_wp['x'], first_wp['y'], first_wp['z']))
             except Exception as e:
-                print("Error generating waypoints when toggling: {}".format(e))
+                print("Error generating waypoints when toggling: {}".format(e))  # Log generation errors
         
-        # If turned off and socket exists, close it
+        # Cleanup network connection when disabled
         elif not self.waypoint_flag and hasattr(self, 'waypoint_socket'):
             try:
-                self.waypoint_socket.shutdown(socket.SHUT_RDWR)  # Shutdown socket
-                self.waypoint_socket.close()  # Close socket
-                delattr(self, 'waypoint_socket')  # Remove socket attribute
+                self.waypoint_socket.shutdown(socket.SHUT_RDWR)  # Stop data transfer
+                self.waypoint_socket.close()  # Close connection
+                delattr(self, 'waypoint_socket')  # Remove socket reference
                 print("Waypoint socket closed")
             except Exception as e:
-                print("Error closing waypoint socket: {}".format(e))
+                print("Error closing waypoint socket: {}".format(e))  # Log cleanup errors
 
-    def toggle_lidar(self):
+    def toggle_lidar(self):  # Enable/disable LiDAR sensor
         """Toggle the LiDAR sensor on/off"""
-        self.lidar_flag = not self.lidar_flag  # Toggle flag
+        self.lidar_flag = not self.lidar_flag  # Switch state
         print("LiDAR sensor toggled: {}".format(self.lidar_flag))
         
-        # If turned on, try to set up the socket and sensor if they don't exist
+        # Initialize systems when enabled
         if self.lidar_flag:
-            # Set up socket if it doesn't exist
+            # Setup network connection if needed
             if not hasattr(self, 'lidar_socket'):
                 try:
                     self.lidar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                    self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                    self.lidar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                     try:
-                        self.lidar_socket.connect((self.host_ip, self.lidar_port))  # Connect to LiDAR server
+                        self.lidar_socket.connect((self.host_ip, self.lidar_port))  # Connect to server
                         print("LiDAR TCP connected")
                     except (ConnectionRefusedError, socket.error) as e:
                         print("LiDAR TCP connection failed: {}. Will continue with local data only.".format(e))
                 except Exception as e:
-                    print("Error setting up LiDAR socket: {}".format(e))
+                    print("Error setting up LiDAR socket: {}".format(e))  # Log network errors
             
-            # Set up LiDAR sensor if it doesn't exist
+            # Create sensor if needed
             if not hasattr(self, 'lidar') or not self.lidar.is_alive:
                 try:
-                    self.setup_lidar()  # Setup LiDAR sensor
+                    self.setup_lidar()  # Initialize sensor
                     print("LiDAR sensor created")
                 except Exception as e:
-                    print("Error creating LiDAR sensor: {}".format(e))
+                    print("Error creating LiDAR sensor: {}".format(e))  # Log sensor errors
             
-            # Start processing thread if it doesn't exist or isn't alive
+            # Start data processing if needed
             if not self.lidar_thread or not self.lidar_thread.is_alive():
-                self.lidar_thread = threading.Thread(target=self.process_lidar_queue)  # Create thread
-                self.lidar_thread.daemon = True  # Set as daemon thread
-                self.lidar_thread.start()  # Start thread
+                self.lidar_thread = threading.Thread(target=self.process_lidar_queue)  # Create processor thread
+                self.lidar_thread.daemon = True  # Set as background thread
+                self.lidar_thread.start()  # Begin processing
                 print("LiDAR processing thread started")
         
-        # If turned off, stop the sensor and close the socket
+        # Cleanup when disabled
         else:
-            # Destroy LiDAR sensor if it exists
+            # Remove sensor if active
             if hasattr(self, 'lidar') and self.lidar.is_alive:
                 try:
-                    self.lidar.stop()  # Stop listening
-                    self.actor_list.remove(self.lidar)  # Remove from actor list
-                    self.lidar.destroy()  # Destroy sensor
-                    delattr(self, 'lidar')  # Remove attribute
+                    self.lidar.stop()  # Stop data collection
+                    self.actor_list.remove(self.lidar)  # Remove from tracking
+                    self.lidar.destroy()  # Delete sensor
+                    delattr(self, 'lidar')  # Remove reference
                     print("LiDAR sensor destroyed")
                 except Exception as e:
-                    print("Error destroying LiDAR sensor: {}".format(e))
-            
-            # Close socket if it exists
-            if hasattr(self, 'lidar_socket'):
-                try:
-                    self.lidar_socket.shutdown(socket.SHUT_RDWR)  # Shutdown socket
-                    self.lidar_socket.close()  # Close socket
-                    delattr(self, 'lidar_socket')  # Remove attribute
-                    print("LiDAR socket closed")
-                except Exception as e:
-                    print("Error closing LiDAR socket: {}".format(e))
+                    print("Error destroying LiDAR sensor: {}".format(e))  # Log cleanup errors
 
-    def toggle_radar(self):
+    def toggle_radar(self):  # Enable/disable RADAR sensor
         """Toggle the RADAR sensor on/off"""
-        self.radar_flag = not self.radar_flag  # Toggle flag
+        self.radar_flag = not self.radar_flag  # Switch state
         print("RADAR sensor toggled: {}".format(self.radar_flag))
         
-        # If turned on, try to set up the socket and sensor if they don't exist
+        # Initialize systems when enabled
         if self.radar_flag:
-            # Set up socket if it doesn't exist
+            # Setup network connection if needed
             if not hasattr(self, 'radar_socket'):
                 try:
                     self.radar_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                    self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                    self.radar_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                     try:
-                        self.radar_socket.connect((self.host_ip, self.radar_port))  # Connect to RADAR server
+                        self.radar_socket.connect((self.host_ip, self.radar_port))  # Connect to server
                         print("RADAR TCP connected")
                     except (ConnectionRefusedError, socket.error) as e:
                         print("RADAR TCP connection failed: {}. Will continue with local data only.".format(e))
                 except Exception as e:
-                    print("Error setting up RADAR socket: {}".format(e))
+                    print("Error setting up RADAR socket: {}".format(e))  # Log network errors
             
-            # Set up RADAR sensor if it doesn't exist
+            # Create sensor if needed
             if not hasattr(self, 'radar') or not self.radar.is_alive:
                 try:
-                    self.setup_radar()  # Setup RADAR sensor
+                    self.setup_radar()  # Initialize sensor
                     print("RADAR sensor created")
                 except Exception as e:
-                    print("Error creating RADAR sensor: {}".format(e))
+                    print("Error creating RADAR sensor: {}".format(e))  # Log sensor errors
             
-            # Start processing thread if it doesn't exist or isn't alive
+            # Start data processing if needed
             if not self.radar_thread or not self.radar_thread.is_alive():
-                self.radar_thread = threading.Thread(target=self.process_radar_queue)  # Create thread
-                self.radar_thread.daemon = True  # Set as daemon thread
-                self.radar_thread.start()  # Start thread
+                self.radar_thread = threading.Thread(target=self.process_radar_queue)  # Create processor thread
+                self.radar_thread.daemon = True  # Set as background thread
+                self.radar_thread.start()  # Begin processing
                 print("RADAR processing thread started")
         
-        # If turned off, stop the sensor and close the socket
+        # Cleanup when disabled
         else:
-            # Destroy RADAR sensor if it exists
+            # Remove sensor if active
             if hasattr(self, 'radar') and self.radar.is_alive:
                 try:
-                    self.radar.stop()  # Stop listening
-                    self.actor_list.remove(self.radar)  # Remove from actor list
-                    self.radar.destroy()  # Destroy sensor
-                    delattr(self, 'radar')  # Remove attribute
+                    self.radar.stop()  # Stop data collection
+                    self.actor_list.remove(self.radar)  # Remove from tracking
+                    self.radar.destroy()  # Delete sensor
+                    delattr(self, 'radar')  # Remove reference
                     print("RADAR sensor destroyed")
                 except Exception as e:
-                    print("Error destroying RADAR sensor: {}".format(e))
+                    print("Error destroying RADAR sensor: {}".format(e))  # Log cleanup errors
             
-            # Close socket if it exists
+            # Close network connection if exists
             if hasattr(self, 'radar_socket'):
                 try:
-                    self.radar_socket.shutdown(socket.SHUT_RDWR)  # Shutdown socket
-                    self.radar_socket.close()  # Close socket
-                    delattr(self, 'radar_socket')  # Remove attribute
+                    self.radar_socket.shutdown(socket.SHUT_RDWR)  # Stop data transfer
+                    self.radar_socket.close()  # Close connection
+                    delattr(self, 'radar_socket')  # Remove reference
                     print("RADAR socket closed")
                 except Exception as e:
-                    print("Error closing RADAR socket: {}".format(e))
+                    print("Error closing RADAR socket: {}".format(e))  # Log cleanup errors
 
-    def toggle_imu(self):
+    def toggle_imu(self):  # Enable/disable IMU sensor
         """Toggle the IMU sensor on/off"""
-        self.imu_flag = not self.imu_flag  # Toggle flag
+        self.imu_flag = not self.imu_flag  # Switch state
         print("IMU sensor toggled: {}".format(self.imu_flag))
         
-        # If turned on, try to set up the socket and sensor if they don't exist
+        # Initialize systems when enabled
         if self.imu_flag:
-            # Set up socket if it doesn't exist
+            # Setup network connection if needed
             if not hasattr(self, 'imu_socket'):
                 try:
                     self.imu_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                    self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                    self.imu_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                     try:
-                        self.imu_socket.connect((self.host_ip, self.imu_port))  # Connect to IMU server
+                        self.imu_socket.connect((self.host_ip, self.imu_port))  # Connect to server
                         print("IMU TCP connected")
                     except (ConnectionRefusedError, socket.error) as e:
                         print("IMU TCP connection failed: {}. Will continue with local data only.".format(e))
                 except Exception as e:
-                    print("Error setting up IMU socket: {}".format(e))
+                    print("Error setting up IMU socket: {}".format(e))  # Log network errors
             
-            # Set up IMU sensor if it doesn't exist
+            # Create sensor if needed
             if not hasattr(self, 'imu') or not self.imu.is_alive:
                 try:
-                    self.setup_imu()  # Setup IMU sensor
+                    self.setup_imu()  # Initialize sensor
                     print("IMU sensor created")
                 except Exception as e:
-                    print("Error creating IMU sensor: {}".format(e))
+                    print("Error creating IMU sensor: {}".format(e))  # Log sensor errors
             
-            # Start processing thread if it doesn't exist or isn't alive
+            # Start data processing if needed
             if not self.imu_thread or not self.imu_thread.is_alive():
-                self.imu_thread = threading.Thread(target=self.process_imu_queue)  # Create thread
-                self.imu_thread.daemon = True  # Set as daemon thread
-                self.imu_thread.start()  # Start thread
+                self.imu_thread = threading.Thread(target=self.process_imu_queue)  # Create processor thread
+                self.imu_thread.daemon = True  # Set as background thread
+                self.imu_thread.start()  # Begin processing
                 print("IMU processing thread started")
         
-        # If turned off, stop the sensor and close the socket
+        # Cleanup when disabled
         else:
-            # Destroy IMU sensor if it exists
+            # Remove sensor if active
             if hasattr(self, 'imu') and self.imu.is_alive:
                 try:
-                    self.imu.stop()  # Stop listening
-                    self.actor_list.remove(self.imu)  # Remove from actor list
-                    self.imu.destroy()  # Destroy sensor
-                    delattr(self, 'imu')  # Remove attribute
+                    self.imu.stop()  # Stop data collection
+                    self.actor_list.remove(self.imu)  # Remove from tracking
+                    self.imu.destroy()  # Delete sensor
+                    delattr(self, 'imu')  # Remove reference
                     print("IMU sensor destroyed")
                 except Exception as e:
-                    print("Error destroying IMU sensor: {}".format(e))
+                    print("Error destroying IMU sensor: {}".format(e))  # Log cleanup errors
             
-            # Close socket if it exists
+            # Close network connection if exists
             if hasattr(self, 'imu_socket'):
                 try:
-                    self.imu_socket.shutdown(socket.SHUT_RDWR)  # Shutdown socket
-                    self.imu_socket.close()  # Close socket
-                    delattr(self, 'imu_socket')  # Remove attribute
+                    self.imu_socket.shutdown(socket.SHUT_RDWR)  # Stop data transfer
+                    self.imu_socket.close()  # Close connection
+                    delattr(self, 'imu_socket')  # Remove reference
                     print("IMU socket closed")
                 except Exception as e:
-                    print("Error closing IMU socket: {}".format(e))
+                    print("Error closing IMU socket: {}".format(e))  # Log cleanup errors
 
-    def toggle_camera(self):
+    def toggle_camera(self):  # Enable/disable camera sensor
         """Toggle the camera sensor on/off"""
-        self.camera_flag = not self.camera_flag  # Toggle flag
+        self.camera_flag = not self.camera_flag  # Switch state
         print("Camera sensor toggled: {}".format(self.camera_flag))
         
-        # If turned on, try to set up the socket and sensor if they don't exist
+        # Initialize systems when enabled
         if self.camera_flag:
-            # Set up socket if it doesn't exist
+            # Setup network server if needed
             if not hasattr(self, 'camera_socket'):
                 try:
                     self.camera_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
-                    self.camera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
-                    self.camera_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Disable Nagle's algorithm
+                    self.camera_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Enable address reuse
+                    self.camera_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
                     try:
-                        self.camera_socket.bind(('0.0.0.0', self.camera_port))  # Bind to all interfaces
-                        self.camera_socket.listen(1)  # Listen for connections
-                        self.camera_socket.settimeout(0.5)  # Non-blocking accept
+                        self.camera_socket.bind(('0.0.0.0', self.camera_port))  # Listen on all interfaces
+                        self.camera_socket.listen(1)  # Accept single client
+                        self.camera_socket.settimeout(0.5)  # Enable non-blocking mode
                         print("Camera TCP server listening on port {}".format(self.camera_port))
-                        self.camera_client = None  # No client connected yet
+                        self.camera_client = None  # Initialize client state
                     except Exception as e:
-                        print("Error setting up camera server: {}".format(e))
+                        print("Error setting up camera server: {}".format(e))  # Log server errors
                 except Exception as e:
-                    print("Error setting up camera socket: {}".format(e))
+                    print("Error setting up camera socket: {}".format(e))  # Log socket errors
             
-            # Set up camera sensor if it doesn't exist
+            # Create sensor if needed
             if not hasattr(self, 'camera') or not self.camera.is_alive:
                 try:
-                    self.setup_camera()  # Setup camera sensor
+                    self.setup_camera()  # Initialize sensor
                     print("Camera sensor created")
                 except Exception as e:
-                    print("Error creating camera sensor: {}".format(e))
+                    print("Error creating camera sensor: {}".format(e))  # Log sensor errors
             
-            # Start processing thread if it doesn't exist or isn't alive
+            # Start data processing if needed
             if not self.camera_thread or not self.camera_thread.is_alive():
-                self.camera_thread = threading.Thread(target=self.process_camera_queue)  # Create thread
-                self.camera_thread.daemon = True  # Set as daemon thread
-                self.camera_thread.start()  # Start thread
+                self.camera_thread = threading.Thread(target=self.process_camera_queue)  # Create processor thread
+                self.camera_thread.daemon = True  # Set as background thread
+                self.camera_thread.start()  # Begin processing
                 print("Camera processing thread started")
         
-        # If turned off, stop the sensor and close the socket
+        # Cleanup when disabled
         else:
-            # Destroy camera sensor if it exists
+            # Remove sensor if active
             if hasattr(self, 'camera') and self.camera.is_alive:
                 try:
-                    self.camera.stop()  # Stop listening
-                    self.actor_list.remove(self.camera)  # Remove from actor list
-                    self.camera.destroy()  # Destroy sensor
-                    delattr(self, 'camera')  # Remove attribute
+                    self.camera.stop()  # Stop data collection
+                    self.actor_list.remove(self.camera)  # Remove from tracking
+                    self.camera.destroy()  # Delete sensor
+                    delattr(self, 'camera')  # Remove reference
                     print("Camera sensor destroyed")
                 except Exception as e:
-                    print("Error destroying camera sensor: {}".format(e))
+                    print("Error destroying camera sensor: {}".format(e))  # Log cleanup errors
             
-            # Close socket if it exists
+            # Close network connections if exist
             if hasattr(self, 'camera_socket'):
                 try:
                     if hasattr(self, 'camera_client') and self.camera_client:
                         self.camera_client.close()  # Close client connection
-                    self.camera_socket.shutdown(socket.SHUT_RDWR)  # Shutdown socket
-                    self.camera_socket.close()  # Close socket
-                    delattr(self, 'camera_socket')  # Remove attribute
+                    self.camera_socket.shutdown(socket.SHUT_RDWR)  # Shutdown camera socket
+                    self.camera_socket.close()  # Close server socket
+                    delattr(self, 'camera_socket')  # Remove reference
                     print("Camera socket closed")
                 except Exception as e:
-                    print("Error closing camera socket: {}".format(e))
+                    print("Error closing camera socket: {}".format(e))  # Log cleanup errors
+    
+    def toggle_velocity(self):  # Enable/disable velocity data streaming
+        """Toggle velocity publishing on/off"""
+        self.velocity_flag = not self.velocity_flag  # Switch state
+        print("Velocity publishing toggled: {}".format(self.velocity_flag))
+        
+        # Initialize network connection when enabled
+        if self.velocity_flag and not hasattr(self, 'velocity_socket'):
+            try:
+                self.velocity_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # Create TCP socket
+                self.velocity_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)  # Optimize for real-time data
+                try:
+                    self.velocity_socket.connect((self.host_ip, self.velocity_port))  # Connect to server
+                    print("Velocity TCP connected")
+                except (ConnectionRefusedError, socket.error) as e:
+                    print("Velocity TCP connection failed: {}. Will continue with local data only.".format(e))
+            except Exception as e:
+                print("Error setting up velocity socket: {}".format(e))  # Log network errors
+        
+        # Cleanup network connection when disabled
+        elif not self.velocity_flag and hasattr(self, 'velocity_socket'):
+            try:
+                self.velocity_socket.shutdown(socket.SHUT_RDWR)
+                self.velocity_socket.close()
+                delattr(self, 'velocity_socket')
+                print("Velocity socket closed")
+            except Exception as e:
+                print("Error closing velocity socket: {}".format(e))
     
     def cleanup(self):
         print("Cleaning up sensors and sockets...")
@@ -1119,6 +1223,8 @@ class SensorManager:
             self.camera_thread.join(timeout=1.0)  # Wait for camera thread to finish
         if self.waypoint_thread and self.waypoint_thread.is_alive():
             self.waypoint_thread.join(timeout=1.0)  # Wait for waypoint thread to finish
+        if self.velocity_thread and self.velocity_thread.is_alive():
+            self.velocity_thread.join(timeout=1.0)  # Wait for velocity thread to finish
         
         # Clean up actors
         for actor in self.actor_list:
@@ -1168,238 +1274,349 @@ class SensorManager:
             except Exception as e:
                 print("Error closing Waypoint socket: {0}".format(e))
                 
+        if hasattr(self, 'velocity_socket'):
+            try:
+                if self.velocity_flag:
+                    self.velocity_socket.shutdown(socket.SHUT_RDWR)
+                    self.velocity_socket.close()
+            except Exception as e:
+                print("Error closing Velocity socket: {0}".format(e))
+                
         print("Sensor cleanup complete")
+
+    def get_current_lane_type(self):
+        """Get the current lane type of the vehicle as an integer"""
+        if not self.vehicle or not self.vehicle.is_alive:
+            return 0  # Return 0 for unknown
+            
+        try:
+            # Get current vehicle location
+            vehicle_location = self.vehicle.get_transform().location
+            
+            # Find the closest waypoint to the vehicle
+            # Use include_junctions=True to get waypoints on junctions too
+            waypoint = self.map.get_waypoint(vehicle_location, project_to_road=True, lane_type=carla.LaneType.Any)
+            
+            if not waypoint:
+                return 0  # Return 0 for no waypoint
+            
+            # Map lane types to human-readable strings for debug output only
+            lane_type_mapping = {
+                carla.LaneType.NONE: "None",
+                carla.LaneType.Driving: "Driving",
+                carla.LaneType.Stop: "Stop",
+                carla.LaneType.Shoulder: "Shoulder",
+                carla.LaneType.Bidirectional: "Bidirectional",
+                carla.LaneType.Parking: "Parking",
+                carla.LaneType.Restricted: "Restricted",
+                carla.LaneType.Border: "Border",
+                carla.LaneType.Sidewalk: "Sidewalk",
+                carla.LaneType.Biking: "Biking",
+                carla.LaneType.Tram: "Tram",
+                carla.LaneType.Rail: "Rail"
+            }
+            
+            # Get the lane type as integer
+            lane_type = int(waypoint.lane_type)
+            
+            # Debug print to see both integer value and string representation
+            print("Current lane type: {} ({})".format(lane_type, lane_type_mapping.get(waypoint.lane_type, 'Unknown')))
+            
+            # Return the integer value
+            return lane_type
+            
+        except Exception as e:
+            print("Error getting lane type: {}".format(e))
+            traceback.print_exc()
+            return 0  # Return 0 for error
+            
+    def has_right_lane(self):
+        """Check if there's a lane to the right of the vehicle"""
+        if not self.vehicle or not self.vehicle.is_alive:
+            return False
+            
+        try:
+            # Get current vehicle location
+            vehicle_location = self.vehicle.get_transform().location
+            
+            # Find the closest waypoint to the vehicle
+            waypoint = self.map.get_waypoint(vehicle_location, project_to_road=True, lane_type=carla.LaneType.Any)
+            
+            if not waypoint:
+                return False
+                
+            # Check if there's a lane to the right
+            right_lane = waypoint.get_right_lane()
+            
+            # If there's no right lane, return False
+            if right_lane is None:
+                print("Has right lane: False (no lane)")
+                return False
+                
+            # Check if the right lane is a sidewalk, shoulder, or parking lane
+            if (right_lane.lane_type == carla.LaneType.Sidewalk or 
+                right_lane.lane_type == carla.LaneType.Shoulder or 
+                right_lane.lane_type == carla.LaneType.Parking):
+                print("Has right lane: False (lane type: {})".format(right_lane.lane_type))
+                return False
+                
+            # There is a valid right lane
+            print("Has right lane: True (lane type: {})".format(right_lane.lane_type))
+            return True
+            
+        except Exception as e:
+            print("Error checking right lane: {}".format(e))
+            traceback.print_exc()
+            return False
+
+    def get_lane_type_string(self, lane_type):
+        """Convert lane type enum to string representation"""
+        # Map lane types to human-readable strings
+        lane_type_mapping = {
+            carla.LaneType.NONE: "None",
+            carla.LaneType.Driving: "Driving",
+            carla.LaneType.Stop: "Stop",
+            carla.LaneType.Shoulder: "Shoulder",
+            carla.LaneType.Bidirectional: "Bidirectional",
+            carla.LaneType.Parking: "Parking",
+            carla.LaneType.Restricted: "Restricted",
+            carla.LaneType.Border: "Border",
+            carla.LaneType.Sidewalk: "Sidewalk",
+            carla.LaneType.Biking: "Biking",
+            carla.LaneType.Tram: "Tram",
+            carla.LaneType.Rail: "Rail"
+        }
+        return lane_type_mapping.get(lane_type, "Unknown")
 
 class TrafficManager:
     def __init__(self, world, ego_vehicle, client):
-        self.world = world  # CARLA world
-        self.client = client  # CARLA client
-        self.ego_vehicle = ego_vehicle  # Main player vehicle
-        self.traffic_vehicles = []  # List of spawned traffic vehicles
-        self.roaming_mode = False  # Flag to track if vehicles are roaming
-        self.actor_list = []  # List to track all actors for cleanup
-        self.port = 8000  # Port for traffic manager
+        self.world = world  # CARLA simulation world
+        self.client = client  # CARLA client connection
+        self.ego_vehicle = ego_vehicle  # Player-controlled vehicle
+        self.traffic_vehicles = []  # List of AI vehicles
+        self.roaming_mode = False  # Whether vehicles follow random paths
+        self.actor_list = []  # All spawned actors for cleanup
+        self.port = 8000  # Traffic manager network port
         
-        # Get traffic manager from client
+        # Initialize CARLA traffic management system
         try:
             print("Initializing CARLA traffic manager...")
 
             try:
-                self.tm = self.client.get_trafficmanager(self.port)  # Get traffic manager
+                self.tm = self.client.get_trafficmanager(self.port)  # Get traffic manager instance
             except AttributeError:
-                # Fallback for older CARLA versions that might not have get_trafficmanager
+                # Handle older CARLA versions
                 self.tm = None
                 print("Traffic manager not available in this CARLA version")
                 
-            # Only set these if tm is available
+            # Configure traffic manager if available
             if self.tm:
-                # Check which methods are available in this version
+                # Set up vehicle behavior parameters
                 try:
-                    self.tm.set_global_distance_to_leading_vehicle(2.5)  # Set distance between vehicles
+                    self.tm.set_global_distance_to_leading_vehicle(2.5)  # Set following distance
                 except AttributeError:
-                    print("set_global_distance_to_leading_vehicle not available")
+                    print("set_global_distance_to_leading_vehicle not available")  # Log unsupported feature
                     
                 try:
-                    self.tm.set_synchronous_mode(True)  # Set synchronous mode
+                    self.tm.set_synchronous_mode(True)  # Enable synchronized updates
                 except AttributeError:
-                    print("set_synchronous_mode not available")
+                    print("set_synchronous_mode not available")  # Log unsupported feature
                     
                 try:
                     self.tm.global_percentage_speed_difference(30.0)  # Set speed difference percentage
                 except AttributeError:
-                    print("global_percentage_speed_difference not available")
+                    print("global_percentage_speed_difference not available")  # Log unsupported feature
                 
             print("Traffic manager initialized successfully")
         except Exception as e:
-            print("Error initializing traffic manager: {}".format(e))
-            self.tm = None
+            print("Error initializing traffic manager: {}".format(e))  # Log initialization error
+            self.tm = None  # Reset traffic manager on failure
             
-    def spawn_traffic_vehicles(self, num_vehicles=3):
+    def spawn_traffic_vehicles(self, num_vehicles=3):  # Spawn AI vehicles in front of player
         """Spawn traffic vehicles in front of the ego vehicle"""
         try:
             print("Spawning {} traffic vehicles...".format(num_vehicles))
             
-            # Get spawn points
+            # Get available spawn locations
             spawn_points = self.world.get_map().get_spawn_points()  # Get all spawn points
             if not spawn_points:
-                print("No spawn points available")
+                print("No spawn points available")  # Log error if no spawn points found
                 return
                 
-            # Get ego vehicle transform
-            ego_transform = self.ego_vehicle.get_transform()  # Get ego vehicle transform
-            ego_location = ego_transform.location  # Get ego vehicle location
-            ego_forward_vector = ego_transform.get_forward_vector()  # Get ego vehicle forward vector
+            # Calculate spawn positions relative to player
+            ego_transform = self.ego_vehicle.get_transform()  # Get player position/rotation
+            ego_location = ego_transform.location  # Extract position
+            ego_forward_vector = ego_transform.get_forward_vector()  # Get forward direction
             
-            # Get vehicle blueprints
-            blueprint_library = self.world.get_blueprint_library()  # Get blueprint library
+            # Get vehicle types from asset library
+            blueprint_library = self.world.get_blueprint_library()  # Access vehicle blueprints
             
-            
+            # Filter for SUVs and large vehicles
             suv_blueprints = []
             for bp in blueprint_library.filter('vehicle.*'):
-                
+                # Only consider 4+ wheel vehicles
                 if int(bp.get_attribute('number_of_wheels').as_int()) >= 4:
-                    # Include only SUVs, trucks, vans, and other large vehicles
+                    # Include SUVs, trucks, vans, and similar large vehicles
                     if any(tag in bp.id.lower() for tag in ['suv', 'offroad', 'truck', 'van', 'jeep', 'rubicon', 'patrol', 'cybertruck']):
                         suv_blueprints.append(bp)
             
-            # If no SUVs were found, fallback to 4+ wheel vehicles
+            # Fallback to any 4+ wheel vehicle if no SUVs found
             if not suv_blueprints:
                 print("No SUV blueprints found, falling back to 4+ wheel vehicles")
                 suv_blueprints = [bp for bp in blueprint_library.filter('vehicle.*') 
                                 if int(bp.get_attribute('number_of_wheels').as_int()) >= 4]
             
-            # Spawn vehicles in front of the ego vehicle
+            # Create vehicles at increasing distances
             for i in range(num_vehicles):
-                # Calculate spawn distance (increasing for each vehicle)
-                spawn_distance = 20 + (i * 15)  # 20m, 35m, 50m, etc.
+                # Calculate distance for this vehicle
+                spawn_distance = 20 + (i * 15)  # Space vehicles 15m apart, starting at 20m
                 
-                # Calculate spawn location in front of ego vehicle
+                # Calculate spawn position in front of player
                 spawn_location = carla.Location(
-                    x=ego_location.x + ego_forward_vector.x * spawn_distance,  # X position ahead of vehicle
-                    y=ego_location.y + ego_forward_vector.y * spawn_distance,  # Y position ahead of vehicle
-                    z=ego_location.z + 0.5  # Slightly above ground
+                    x=ego_location.x + ego_forward_vector.x * spawn_distance,  # Forward offset
+                    y=ego_location.y + ego_forward_vector.y * spawn_distance,  # Lateral offset
+                    z=ego_location.z + 0.5  # Height offset for ground clearance
                 )
                 
-                # Find closest spawn point to desired location
+                # Find nearest valid spawn point
                 closest_spawn_point = None
                 min_distance = float('inf')
                 for spawn_point in spawn_points:
-                    dist = spawn_location.distance(spawn_point.location)  # Calculate distance
+                    dist = spawn_location.distance(spawn_point.location)  # Calculate distance to desired position
                     if dist < min_distance:
                         min_distance = dist
-                        closest_spawn_point = spawn_point  # Find closest spawn point
+                        closest_spawn_point = spawn_point  # Update closest point
                 
                 if not closest_spawn_point:
-                    print("Could not find a valid spawn point for vehicle {}".format(i+1))
+                    print("Could not find a valid spawn point for vehicle {}".format(i+1))  # Log spawn point error
                     continue
                 
-                # Choose a random blueprint from SUVs
-                vehicle_bp = random.choice(suv_blueprints)  # Select random SUV blueprint
+                # Select random vehicle type
+                vehicle_bp = random.choice(suv_blueprints)  # Choose random SUV blueprint
                 
-                # Try to spawn the vehicle
+                # Create vehicle instance
                 try:
-                    vehicle = self.world.spawn_actor(vehicle_bp, closest_spawn_point)  # Spawn vehicle at spawn point
+                    vehicle = self.world.spawn_actor(vehicle_bp, closest_spawn_point)  # Spawn vehicle
                     if vehicle:
-                        self.traffic_vehicles.append(vehicle)  # Add to traffic vehicles list
+                        self.traffic_vehicles.append(vehicle)  # Track for management
                         print("Spawned {} at {}".format(vehicle.type_id, closest_spawn_point.location))
                         
-                        # Set up basic autopilot - this should work in all CARLA versions
-                        vehicle.set_autopilot(True)  # Enable autopilot for traffic vehicle
+                        # Enable basic AI control
+                        vehicle.set_autopilot(True)  # Enable built-in autopilot
                         
-                        # Configure TM settings only if available
+                        # Configure advanced AI if available
                         if self.tm:
                             try:
-                                
-                                self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-20, 10))  # Set random speed
+                                # Set random speed variation
+                                self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-20, 10))  # Vary speed -20% to +10%
                             except AttributeError:
-                                # Handle case where the method isn't available
-                                pass
+                                pass  # Skip if feature not available
                     else:
-                        print("Failed to spawn vehicle {}".format(i+1))
+                        print("Failed to spawn vehicle {}".format(i+1))  # Log spawn failure
                 except Exception as e:
                     print("Failed to spawn vehicle {}".format(i+1))
-                    print("Error spawning vehicle {}: {}".format(i+1, e))
+                    print("Error spawning vehicle {}: {}".format(i+1, e))  # Log spawn error
             
             print("Successfully spawned {} traffic vehicles".format(len(self.traffic_vehicles)))
             
         except Exception as e:
-            print("Error in spawn_traffic_vehicles: {}".format(e))
+            print("Error in spawn_traffic_vehicles: {}".format(e))  # Log method error
     
-    def spawn_random_traffic_vehicles(self, num_vehicles=3):
+    def spawn_random_traffic_vehicles(self, num_vehicles=3):  # Spawn AI vehicles at random locations
         try:
             print("Spawning {} random traffic vehicles...".format(num_vehicles))
             
-            # Clean up existing traffic vehicles first
+            # Remove existing traffic
             for vehicle in self.traffic_vehicles:
                 if vehicle and vehicle.is_alive:
-                    vehicle.destroy()  # Destroy existing vehicles
-            self.traffic_vehicles = []  # Clear list
+                    vehicle.destroy()  # Remove vehicle from simulation
+            self.traffic_vehicles = []  # Clear tracking list
             
-            # Get all available vehicle blueprints
+            # Get available vehicle types
             blueprints = self.world.get_blueprint_library().filter('vehicle.*')  # Get all vehicle blueprints
             
-            # Filter for only SUVs and large vehicles
+            # Filter for SUVs and large vehicles
             suv_blueprints = []
             for bp in blueprints:
-                # Filter out bicycles and motorcycles
+                # Only consider 4+ wheel vehicles
                 if int(bp.get_attribute('number_of_wheels').as_int()) >= 4:
-                    # Include only SUVs, trucks, vans, and other large vehicles
+                    # Include SUVs, trucks, vans, and similar large vehicles
                     if any(tag in bp.id.lower() for tag in ['suv', 'offroad', 'truck', 'van', 'jeep', 'rubicon', 'patrol', 'cybertruck']):
                         suv_blueprints.append(bp)
             
-            # If no SUVs were found, fallback to 4+ wheel vehicles
+            # Fallback to any 4+ wheel vehicle if no SUVs found
             if not suv_blueprints:
                 print("No SUV blueprints found, falling back to 4+ wheel vehicles")
                 suv_blueprints = [bp for bp in blueprints if int(bp.get_attribute('number_of_wheels').as_int()) >= 4]
             
-            # Get all spawn points
+            # Get available spawn locations
             spawn_points = self.world.get_map().get_spawn_points()  # Get all spawn points
             
             if not spawn_points:
-                print("No spawn points available")
+                print("No spawn points available")  # Log error if no spawn points found
                 return
                 
-            # Shuffle spawn points for randomness
-            random.shuffle(spawn_points)  # Randomize spawn points
+            # Randomize spawn point order
+            random.shuffle(spawn_points)  # Mix up spawn locations
             
-            # Try to spawn vehicles
+            # Create vehicles at random points
             spawned_count = 0
             for i in range(num_vehicles):
                 if i >= len(spawn_points):
-                    break  # No more spawn points available
+                    break  # Stop if no more spawn points
                 
-                # Select a random blueprint from SUVs
-                blueprint = random.choice(suv_blueprints)  # Select random SUV blueprint
+                # Select random vehicle type
+                blueprint = random.choice(suv_blueprints)  # Choose random SUV blueprint
                 
-                # Try to spawn vehicle
+                # Create vehicle instance
                 try:
-                    # Set random color
+                    # Customize vehicle appearance
                     if blueprint.has_attribute('color'):
                         color = random.choice(blueprint.get_attribute('color').recommended_values)  # Choose random color
-                        blueprint.set_attribute('color', color)  # Set vehicle color
+                        blueprint.set_attribute('color', color)  # Apply color
                     
-                    # Set as ego to make it important
+                    # Set vehicle role
                     if blueprint.has_attribute('role_name'):
-                        blueprint.set_attribute('role_name', 'traffic')  # Set role name
+                        blueprint.set_attribute('role_name', 'traffic')  # Mark as traffic vehicle
                     
-                    # Get spawn point
-                    spawn_point = spawn_points[i]  # Get spawn point
+                    # Get spawn location
+                    spawn_point = spawn_points[i]  # Use next available point
                     
-                    # Spawn the vehicle
+                    # Create vehicle
                     vehicle = self.world.spawn_actor(blueprint, spawn_point)  # Spawn vehicle
                     
                     if vehicle:
-                        # Add to traffic vehicles list
-                        self.traffic_vehicles.append(vehicle)  # Add to traffic vehicles list
-                        self.actor_list.append(vehicle)  # Add to actor list for cleanup
+                        # Track new vehicle
+                        self.traffic_vehicles.append(vehicle)  # Add to traffic list
+                        self.actor_list.append(vehicle)  # Add to cleanup list
                         spawned_count += 1
                         
-                        # Set basic autopilot - this should work in all CARLA versions
-                        vehicle.set_autopilot(True)  # Enable autopilot
+                        # Enable basic AI control
+                        vehicle.set_autopilot(True)  # Enable built-in autopilot
                         
-                        # Only attempt to use TM methods if TM is available
+                        # Configure advanced AI if available
                         if self.tm:
                             try:
-                                
-                                self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-20, 10))  # Set random speed
+                                # Set random speed variation
+                                self.tm.vehicle_percentage_speed_difference(vehicle, random.uniform(-20, 10))  # Vary speed -20% to +10%
                             except AttributeError:
-                                # Handle case where the method isn't available
-                                pass
+                                pass  # Skip if feature not available
                         
                         print("Spawned {} at {}".format(vehicle.type_id, spawn_point.location))
                 
                 except Exception as e:
-                    print("Failed to spawn vehicle: {}".format(e))
+                    print("Failed to spawn vehicle: {}".format(e))  # Log spawn error
             
             print("Successfully spawned {} random traffic vehicles".format(spawned_count))
             
         except Exception as e:
-            print("Error in spawn_random_traffic_vehicles: {}".format(e))
+            print("Error in spawn_random_traffic_vehicles: {}".format(e))  # Log method error
     
-    def set_vehicles_to_roam(self):
+    def set_vehicles_to_roam(self):  # Enable autonomous driving for all traffic
         try:
+            # Verify traffic exists
             if not hasattr(self, 'traffic_vehicles') or len(self.traffic_vehicles) == 0:
-                print("No traffic vehicles to control")
+                print("No traffic vehicles to control")  # Log error if no vehicles found
                 return False
             
             # Toggle roaming mode state
@@ -1594,166 +1811,180 @@ class CarlaControl:
                 self.steer = max(-1.0, min(1.0, self.steer))
                 self.brake = max(0.0, min(1.0, self.brake))
                 
-                print(f"Received control: Throttle={self.throttle:.2f}, Steering={self.steer:.2f}, Brake={self.brake:.2f}, Reverse={self.reverse}")
+                print("Received control: Throttle={:.2f}, Steering={:.2f}, Brake={:.2f}, Reverse={}".format(
+                    self.throttle, self.steer, self.brake, self.reverse))
             else:
-                print(f"Invalid command format: {command}")
+                print("Invalid command format: {}".format(command))
                 
         except Exception as e:
-            print(f"Error parsing control command '{command}': {e}")
+            print("Error parsing control command '{}': {}".format(command, e))
             traceback.print_exc()
 
     def cleanup(self):
         print("\n=== Starting Cleanup ===")
         try:
             print("Setting running flag to False...")
-            self.running = False
+            self.running = False  # Signal all threads to stop
             
-            # Stop TCP control server
+            # Stop network control interface
             print("Stopping TCP control server...")
-            self.control_server_running = False
+            self.control_server_running = False  # Signal server to stop
             
+            # Close client connection if active
             if hasattr(self, 'control_client_socket') and self.control_client_socket:
                 try:
-                    self.control_client_socket.close()
+                    self.control_client_socket.close()  # Close client socket
                 except:
-                    pass
+                    pass  # Ignore cleanup errors
                     
+            # Close server socket if active
             if hasattr(self, 'control_server_socket') and self.control_server_socket:
                 try:
-                    self.control_server_socket.close()
+                    self.control_server_socket.close()  # Close server socket
                 except:
-                    pass
+                    pass  # Ignore cleanup errors
             
+            # Clean up sensor systems
             if hasattr(self, 'sensor_manager') and self.sensor_manager:
                 print("Cleaning up sensor manager...")
-                self.sensor_manager.cleanup()
+                self.sensor_manager.cleanup()  # Remove all sensors
                 
+            # Clean up traffic systems
             if hasattr(self, 'traffic_manager') and self.traffic_manager:
                 print("Cleaning up traffic vehicles...")
-                self.traffic_manager.cleanup()
+                self.traffic_manager.cleanup()  # Remove all AI vehicles
             
+            # Remove player vehicle
             if hasattr(self, 'vehicle') and self.vehicle:
                 print("Destroying vehicle...")
-                self.vehicle.destroy()
+                self.vehicle.destroy()  # Remove from simulation
             
+            # Reset simulation settings
             if hasattr(self, 'world'):
                 print("Resetting world settings...")
-                settings = self.world.get_settings()
-                settings.synchronous_mode = False
-                self.world.apply_settings(settings)
+                settings = self.world.get_settings()  # Get current settings
+                settings.synchronous_mode = False  # Disable sync mode
+                self.world.apply_settings(settings)  # Apply changes
             
+            # Clean up display
             print("Quitting Pygame...")
-            pygame.quit()
+            pygame.quit()  # Close display
             print("Cleanup complete")
             
         except Exception as e:
-            print("ERROR during cleanup: {0}".format(str(e)))
+            print("ERROR during cleanup: {0}".format(str(e)))  # Log cleanup errors
             
-    def setup_pygame(self):
+    def setup_pygame(self):  # Initialize display and UI components
         """Initialize pygame and create the control panel window"""
         try:
-            pygame.init()
-            pygame.font.init()
+            pygame.init()  # Initialize pygame
+            pygame.font.init()  # Initialize font system
             
-            # Set up display
-            self.display_width = 800
-            self.display_height = 600
-            self.display = pygame.display.set_mode((self.display_width, self.display_height))
-            pygame.display.set_caption("CARLA Control Panel")
+            # Configure display window
+            self.display_width = 800  # Window width
+            self.display_height = 600  # Window height
+            self.display = pygame.display.set_mode((self.display_width, self.display_height))  # Create window
+            pygame.display.set_caption("CARLA Control Panel")  # Set window title
             
-            # Set up fonts
-            self.font = pygame.font.SysFont('Arial', 20)
-            self.small_font = pygame.font.SysFont('Arial', 16)
-            self.large_font = pygame.font.SysFont('Arial', 24)
-            self.title_font = pygame.font.SysFont('Arial', 30, True)  # Bold font for titles
+            # Load text fonts
+            self.font = pygame.font.SysFont('Arial', 20)  # Default text
+            self.small_font = pygame.font.SysFont('Arial', 16)  # Small text
+            self.large_font = pygame.font.SysFont('Arial', 24)  # Large text
+            self.title_font = pygame.font.SysFont('Arial', 30, True)  # Section titles
             
-            # Define colors
-            self.BLACK = (0, 0, 0)
-            self.WHITE = (255, 255, 255)
-            self.GRAY = (100, 100, 100)
-            self.LIGHT_GRAY = (200, 200, 200)
-            self.RED = (255, 0, 0)
-            self.GREEN = (0, 255, 0)
-            self.BLUE = (0, 0, 255)
-            self.YELLOW = (255, 255, 0)
+            # Define UI colors
+            self.BLACK = (0, 0, 0)  # Background
+            self.WHITE = (255, 255, 255)  # Primary text
+            self.GRAY = (100, 100, 100)  # Secondary elements
+            self.LIGHT_GRAY = (200, 200, 200)  # Disabled elements
+            self.RED = (255, 0, 0)  # Warnings/errors
+            self.GREEN = (0, 255, 0)  # Success/active
+            self.BLUE = (0, 0, 255)  # Highlights
+            self.YELLOW = (255, 255, 0)  # Caution/status
             
-            # UI state
-            self.show_help = True  # Show help text by default
+            # UI state flags
+            self.show_help = True  # Show help overlay
             
             print("Pygame setup complete")
             
         except Exception as e:
-            print("ERROR in pygame setup: {0}".format(str(e)))
+            print("ERROR in pygame setup: {0}".format(str(e)))  # Log setup errors
             raise
         
-    def setup_fonts(self):
+    def setup_fonts(self):  # Load text rendering fonts
         try:
             print("Loading fonts...")
-            self.font = pygame.font.Font(None, 36)
-            self.small_font = pygame.font.Font(None, 24)
+            self.font = pygame.font.Font(None, 36)  # Default system font
+            self.small_font = pygame.font.Font(None, 24)  # Smaller system font
             print("Fonts loaded successfully")
         except Exception as e:
-            print("ERROR in font setup: {0}".format(str(e)))
+            print("ERROR in font setup: {0}".format(str(e)))  # Log font errors
             raise
             
-    def setup_carla_client(self):
+    def setup_carla_client(self):  # Connect to CARLA and initialize simulation
         try:
             print("Connecting to CARLA...")
-            self.client = carla.Client('localhost', 2000)
-            self.client.set_timeout(10.0)
+            self.client = carla.Client('localhost', 2000)  # Connect to local server
+            self.client.set_timeout(10.0)  # Set connection timeout
             
-            # Get available maps
-            available_maps = self.client.get_available_maps()
+            # Get list of available maps
+            available_maps = self.client.get_available_maps()  # Get all maps
             
-            # Validate the selected map
+            # Find requested map
             selected_map = None
             for map_path in available_maps:
-                map_name = os.path.basename(map_path)
+                map_name = os.path.basename(map_path)  # Extract map name
                 if TOWN_MAP in map_name:
-                    selected_map = map_path
+                    selected_map = map_path  # Found requested map
                     break
             
-            # If selected map is valid, load it; otherwise, use default (Town01)
+            # Load appropriate map
             if selected_map:
-                print(f"Loading selected map: {TOWN_MAP}...")
-                self.client.load_world(TOWN_MAP)
+                print("Loading selected map: {}...".format(TOWN_MAP))
+                self.client.load_world(TOWN_MAP)  # Load requested map
             else:
-                print(f"Warning: Map '{TOWN_MAP}' not found. Loading default map (Town01)...")
-                self.client.load_world('Town01')
+                print("Warning: Map '{}' not found. Loading default map (Town01)...".format(TOWN_MAP))
+                self.client.load_world('Town01')  # Load default map
             
+            # Get world interface
             print("Getting CARLA world...")
-            self.world = self.client.get_world()
-            current_map = os.path.basename(self.world.get_map().name)
-            print(f"Connected to CARLA world ({current_map})")
+            self.world = self.client.get_world()  # Get simulation world
+            current_map = os.path.basename(self.world.get_map().name)  # Get active map name
+            print("Connected to CARLA world ({})".format(current_map))
             
-            # Apply weather settings
-            self.apply_weather_preset(WEATHER_PRESET)
+            # Configure environment
+            self.apply_weather_preset(WEATHER_PRESET)  # Set weather conditions
             
+            # Create player vehicle
             print("Spawning vehicle...")
-            self.spawn_vehicle()
+            self.spawn_vehicle()  # Create and place vehicle
         except Exception as e:
-            print("ERROR in CARLA client setup: {0}".format(str(e)))
+            print("ERROR in CARLA client setup: {0}".format(str(e)))  # Log setup errors
             raise
         
-    def spawn_vehicle(self):
+    def spawn_vehicle(self):  # Create and place player vehicle
         try:
+            # Remove existing vehicles
             print("Cleaning up existing vehicles...")
-            vehicle_list = self.world.get_actors().filter('vehicle.*')
+            vehicle_list = self.world.get_actors().filter('vehicle.*')  # Find all vehicles
             for vehicle in vehicle_list:
-                vehicle.destroy()
+                vehicle.destroy()  # Remove each vehicle
                 
+            # Get valid spawn locations
             print("Getting spawn points...")
-            spawn_points = self.world.get_map().get_spawn_points()
+            spawn_points = self.world.get_map().get_spawn_points()  # Get all spawn points
             if not spawn_points:
-                raise ValueError("No spawn points found!")
+                raise ValueError("No spawn points found!")  # Error if no spawns available
                 
-            spawn_point = spawn_points[0]
-            spawn_point.location.z += 0.5
+            # Select spawn location
+            spawn_point = spawn_points[1]  # Use second spawn point
+            spawn_point.location.z += 0.5  # Raise slightly for clearance
             
+            # Get vehicle blueprints
             print("Setting up vehicle blueprint...")
-            blueprint_library = self.world.get_blueprint_library()
+            blueprint_library = self.world.get_blueprint_library()  # Get all blueprints
             
-            # Filter for only SUVs and large vehicles
+            # Define preferred vehicle models
             suv_models = [
                 'vehicle.audi.etron',
                 'vehicle.chevrolet.blazer',
@@ -1768,35 +1999,37 @@ class CarlaControl:
                 'vehicle.volkswagen.t2'
             ]
             
-            # Try to find one of the SUV models
+            # Try to find preferred vehicle
             vehicle_bp = None
             for model in suv_models:
                 try:
-                    bp = blueprint_library.find(model)
+                    bp = blueprint_library.find(model)  # Look for specific model
                     if bp:
-                        vehicle_bp = bp
-                        print(f"Selected SUV model: {model}")
+                        vehicle_bp = bp  # Use first available model
+                        print("Selected SUV model: {}".format(model))
                         break
                 except:
-                    continue
+                    continue  # Try next model
             
-            # If no specific SUV model was found, try a generic filter for SUVs
+            # Fallback to generic SUV if preferred not found
             if not vehicle_bp:
                 suv_blueprints = []
                 for bp in blueprint_library.filter('vehicle'):
+                    # Look for SUV-like vehicles
                     if any(tag in bp.id for tag in ['suv', 'offroad', 'truck']):
                         suv_blueprints.append(bp)
                 
                 if suv_blueprints:
-                    vehicle_bp = random.choice(suv_blueprints)
-                    print(f"Selected generic SUV model: {vehicle_bp.id}")
+                    vehicle_bp = random.choice(suv_blueprints)  # Pick random SUV
+                    print("Selected generic SUV model: {}".format(vehicle_bp.id))
                 else:
-                    # Fallback to any vehicle if no SUVs are found
-                    vehicle_bp = blueprint_library.find('vehicle.tesla.cybertruck')
+                    # Use default vehicle if no SUVs available
+                    vehicle_bp = blueprint_library.find('vehicle.tesla.cybertruck')  # Use Cybertruck
                     print("No SUV models found, using fallback vehicle")
             
+            # Create vehicle in simulation
             print("Spawning vehicle actor...")
-            self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+            self.vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)  # Spawn vehicle
             if not self.vehicle:
                 raise ValueError("Failed to spawn vehicle!")
                 
@@ -1806,10 +2039,10 @@ class CarlaControl:
             
             if hasattr(self, 'sensor_manager'):
                 print("Sensor manager created successfully")
-                print("Sensor flags in manager - LIDAR: {}, RADAR: {}, IMU: {}, CAMERA: {}, WAYPOINT: {}".format(
+                print("Sensor flags in manager - LIDAR: {}, RADAR: {}, IMU: {}, CAMERA: {}, WAYPOINT: {}, VELOCITY: {}".format(
                     self.sensor_manager.lidar_flag, self.sensor_manager.radar_flag, 
                     self.sensor_manager.imu_flag, self.sensor_manager.camera_flag,
-                    self.sensor_manager.waypoint_flag))
+                    self.sensor_manager.waypoint_flag, self.sensor_manager.velocity_flag))
             else:
                 print("ERROR: Failed to create sensor manager!")
             
@@ -1837,87 +2070,91 @@ class CarlaControl:
             print("ERROR in vehicle spawn: {}".format(str(e)))
             raise
             
-    def apply_weather_preset(self, preset):
+    def apply_weather_preset(self, preset):  # Apply predefined weather conditions
         """Apply a predefined weather preset to the world"""
         try:
             # Dictionary of weather presets
-            weather_presets = {
-                'ClearNoon': carla.WeatherParameters.ClearNoon,
-                'CloudyNoon': carla.WeatherParameters.CloudyNoon,
-                'WetNoon': carla.WeatherParameters.WetNoon,
-                'WetCloudyNoon': carla.WeatherParameters.WetCloudyNoon,
-                'MidRainyNoon': carla.WeatherParameters.MidRainyNoon,
-                'HardRainNoon': carla.WeatherParameters.HardRainNoon,
-                'SoftRainNoon': carla.WeatherParameters.SoftRainNoon,
-                'ClearSunset': carla.WeatherParameters.ClearSunset,
-                'CloudySunset': carla.WeatherParameters.CloudySunset,
-                'WetSunset': carla.WeatherParameters.WetSunset,
-                'WetCloudySunset': carla.WeatherParameters.WetCloudySunset,
-                'MidRainSunset': carla.WeatherParameters.MidRainSunset,
-                'HardRainSunset': carla.WeatherParameters.HardRainSunset,
-                'SoftRainSunset': carla.WeatherParameters.SoftRainSunset,
+            weather_presets = {  # Map preset names to CARLA weather parameters
+                'ClearNoon': carla.WeatherParameters.ClearNoon,  # Clear sky with noon sun
+                'CloudyNoon': carla.WeatherParameters.CloudyNoon,  # Cloudy sky with noon sun
+                'WetNoon': carla.WeatherParameters.WetNoon,  # Wet roads with noon sun
+                'WetCloudyNoon': carla.WeatherParameters.WetCloudyNoon,  # Wet roads with cloudy noon sky
+                'MidRainyNoon': carla.WeatherParameters.MidRainyNoon,  # Medium rain with noon sun
+                'HardRainNoon': carla.WeatherParameters.HardRainNoon,  # Heavy rain with noon sun
+                'SoftRainNoon': carla.WeatherParameters.SoftRainNoon,  # Light rain with noon sun
+                'ClearSunset': carla.WeatherParameters.ClearSunset,  # Clear sky with sunset sun
+                'CloudySunset': carla.WeatherParameters.CloudySunset,  # Cloudy sky with sunset sun
+                'WetSunset': carla.WeatherParameters.WetSunset,  # Wet roads with sunset sun
+                'WetCloudySunset': carla.WeatherParameters.WetCloudySunset,  # Wet roads with cloudy sunset
+                'MidRainSunset': carla.WeatherParameters.MidRainSunset,  # Medium rain with sunset sun
+                'HardRainSunset': carla.WeatherParameters.HardRainSunset,  # Heavy rain with sunset sun
+                'SoftRainSunset': carla.WeatherParameters.SoftRainSunset,  # Light rain with sunset sun
             }
             
             # Apply the selected weather preset or default to ClearNoon
             if preset in weather_presets:
-                print(f"Applying weather preset: {preset}")
-                self.world.set_weather(weather_presets[preset])
+                print("Applying weather preset: {}".format(preset))
+                self.world.set_weather(weather_presets[preset])  # Set selected weather
             else:
-                print(f"Warning: Weather preset '{preset}' not found. Using default (ClearNoon)...")
-                self.world.set_weather(carla.WeatherParameters.ClearNoon)
+                print("Warning: Weather preset '{}' not found. Using default (ClearNoon)...".format(preset))
+                self.world.set_weather(carla.WeatherParameters.ClearNoon)  # Set default weather
                 
         except Exception as e:
-            print(f"Error applying weather preset: {e}")
+            print("Error applying weather preset: {}".format(e))
             print("Using default weather settings...")
             
-    def process_input(self, event):
-        """Process input events"""
-        if event.type == pygame.QUIT:
+    def process_input(self, event):  # Handle user input events
+        """Process input events for vehicle control, sensors, and traffic management"""
+        if event.type == pygame.QUIT:  # Handle window close button
             return True
         
-        if event.type == pygame.KEYUP:
-            if event.key == pygame.K_ESCAPE:
+        if event.type == pygame.KEYUP:  # Handle key release events
+            if event.key == pygame.K_ESCAPE:  # ESC key exits program
                 return True
             
             # Toggle sensors with number keys
-            elif event.key == pygame.K_1:
+            elif event.key == pygame.K_1:  # Toggle LiDAR
                 if self.sensor_manager:
                     self.sensor_manager.toggle_lidar()
                     print("LIDAR toggled: {}".format(self.sensor_manager.lidar_flag))
-            elif event.key == pygame.K_2:
+            elif event.key == pygame.K_2:  # Toggle RADAR
                 if self.sensor_manager:
                     self.sensor_manager.toggle_radar()
                     print("RADAR toggled: {}".format(self.sensor_manager.radar_flag))
-            elif event.key == pygame.K_3:
+            elif event.key == pygame.K_3:  # Toggle IMU
                 if self.sensor_manager:
                     self.sensor_manager.toggle_imu()
                     print("IMU toggled: {}".format(self.sensor_manager.imu_flag))
-            elif event.key == pygame.K_4:
+            elif event.key == pygame.K_4:  # Toggle Camera
                 if self.sensor_manager:
                     self.sensor_manager.toggle_camera()
                     print("Camera toggled: {}".format(self.sensor_manager.camera_flag))
-            elif event.key == pygame.K_5:
+            elif event.key == pygame.K_5:  # Toggle Waypoint
                 if self.sensor_manager:
                     self.sensor_manager.toggle_waypoint()
                     print("Waypoint toggled: {}".format(self.sensor_manager.waypoint_flag))
+            elif event.key == pygame.K_6:  # Toggle Velocity
+                if self.sensor_manager:
+                    self.sensor_manager.toggle_velocity()
+                    print("Velocity toggled: {}".format(self.sensor_manager.velocity_flag))
             
             # Reset vehicle controls when key is released
-            elif event.key == pygame.K_w or event.key == pygame.K_UP:
+            elif event.key == pygame.K_w or event.key == pygame.K_UP:  # Forward acceleration
                 self.accelerating_forward = False  # Stop accelerating forward
                 # Don't reset throttle immediately - it will gradually decrease
-            elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
+            elif event.key == pygame.K_s or event.key == pygame.K_DOWN:  # Reverse acceleration
                 self.accelerating_reverse = False  # Stop accelerating reverse
                 # Don't reset throttle immediately - it will gradually decrease
             elif event.key == pygame.K_a or event.key == pygame.K_LEFT or event.key == pygame.K_d or event.key == pygame.K_RIGHT:
-                self.steer = 0.0
+                self.steer = 0.0  # Center steering
             
             # Toggle reverse with R key (kept for compatibility)
-            elif event.key == pygame.K_r:
+            elif event.key == pygame.K_r:  # Toggle reverse gear
                 self.reverse = not self.reverse
                 print("Reverse: {}".format(self.reverse))
             
             # Traffic management keys - handle gracefully if traffic_manager is None
-            elif event.key == pygame.K_t:
+            elif event.key == pygame.K_t:  # Add single traffic vehicle
                 # Add a single traffic vehicle
                 if self.traffic_manager:
                     try:
@@ -1927,7 +2164,7 @@ class CarlaControl:
                         print("Error adding traffic vehicle: {}".format(e))
                 else:
                     print("Traffic manager not available")
-            elif event.key == pygame.K_u:
+            elif event.key == pygame.K_u:  # Add random traffic vehicles
                 # Add random traffic vehicles
                 if self.traffic_manager:
                     try:
@@ -1937,7 +2174,7 @@ class CarlaControl:
                         print("Error adding random traffic vehicles: {}".format(e))
                 else:
                     print("Traffic manager not available")
-            elif event.key == pygame.K_y:
+            elif event.key == pygame.K_y:  # Remove last traffic vehicle
                 # Remove last traffic vehicle
                 if self.traffic_manager:
                     try:
@@ -1949,7 +2186,7 @@ class CarlaControl:
                         print("Error removing traffic vehicle: {}".format(e))
                 else:
                     print("Traffic manager not available")
-            elif event.key == pygame.K_m:
+            elif event.key == pygame.K_m:  # Toggle roaming mode
                 # Toggle roaming mode for traffic vehicles
                 if self.traffic_manager:
                     try:
@@ -1961,27 +2198,27 @@ class CarlaControl:
                     print("Traffic manager not available")
             
             # Help toggle
-            elif event.key == pygame.K_h:
+            elif event.key == pygame.K_h:  # Toggle help display
                 self.show_help = not self.show_help
                 print("Help: {}".format(self.show_help))
         
-        if event.type == pygame.KEYDOWN:
+        if event.type == pygame.KEYDOWN:  # Handle key press events
             # Vehicle control with WASD or arrow keys
-            if event.key == pygame.K_w or event.key == pygame.K_UP:
+            if event.key == pygame.K_w or event.key == pygame.K_UP:  # Forward
                 self.accelerating_forward = True  # Start accelerating forward
                 self.accelerating_reverse = False  # Stop accelerating reverse
                 self.reverse = False  # Ensure reverse is off when accelerating forward
                 self.brake = 0.0      # Ensure brake is off
-            elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
+            elif event.key == pygame.K_s or event.key == pygame.K_DOWN:  # Reverse
                 self.accelerating_reverse = True  # Start accelerating reverse
                 self.accelerating_forward = False  # Stop accelerating forward
                 self.brake = 0.0      # Ensure brake is off
-            elif event.key == pygame.K_a or event.key == pygame.K_LEFT:
+            elif event.key == pygame.K_a or event.key == pygame.K_LEFT:  # Steer left
                 self.steer = max(-1.0, self.steer - 1.0)
-            elif event.key == pygame.K_d or event.key == pygame.K_RIGHT:
+            elif event.key == pygame.K_d or event.key == pygame.K_RIGHT:  # Steer right
                 self.steer = min(1.0, self.steer + 1.0)
             # Add brake control with spacebar
-            elif event.key == pygame.K_SPACE:
+            elif event.key == pygame.K_SPACE:  # Brake
                 self.brake = min(1.0, self.brake + 1.0)
                 self.throttle = 0.0   # Ensure throttle is off when braking
                 self.accelerating_forward = False  # Stop accelerating
@@ -2113,6 +2350,13 @@ class CarlaControl:
                 waypoint_text = self.font.render("Waypoint: {}".format(waypoint_status), True, waypoint_color)
                 self.display.blit(waypoint_text, (left_panel_x, left_panel_y))
                 left_panel_y += 30
+                
+                # Velocity status
+                velocity_status = "ON" if self.sensor_manager.velocity_flag else "OFF"
+                velocity_color = self.GREEN if self.sensor_manager.velocity_flag else self.RED
+                velocity_text = self.font.render("Velocity: {}".format(velocity_status), True, velocity_color)
+                self.display.blit(velocity_text, (left_panel_x, left_panel_y))
+                left_panel_y += 30
             else:
                 no_sensors_text = self.font.render("No sensors available", True, self.RED)
                 self.display.blit(no_sensors_text, (left_panel_x, left_panel_y))
@@ -2142,6 +2386,26 @@ class CarlaControl:
             controls_title = self.large_font.render("Vehicle Controls", True, self.WHITE)
             self.display.blit(controls_title, (right_panel_x, right_panel_y))
             right_panel_y += 40
+            
+            # Vehicle speed display
+            if self.vehicle and self.vehicle.is_alive:
+                velocity = self.vehicle.get_velocity()
+                speed = 3.6 * math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)  # Convert to km/h
+                speed_text = self.font.render("Speed: {:.1f} km/h".format(speed), True, self.YELLOW)
+                self.display.blit(speed_text, (right_panel_x, right_panel_y))
+                
+                # Speed bar
+                pygame.draw.rect(self.display, self.GRAY, (right_panel_x + 150, right_panel_y, 100, 20), 1)
+                speed_percentage = min(speed / 120.0, 1.0)  # Assume 120 km/h is max for display
+                speed_color = self.GREEN
+                if speed > 60:
+                    speed_color = self.YELLOW
+                if speed > 100:
+                    speed_color = self.RED
+                pygame.draw.rect(self.display, speed_color, (right_panel_x + 150, right_panel_y, int(speed_percentage * 100), 20))
+                
+                # Remove velocity components display
+                right_panel_y += 30
             
             # Throttle indicator
             throttle_text = self.font.render("Throttle: {:.2f}{}".format(
@@ -2174,7 +2438,23 @@ class CarlaControl:
             reverse_color = self.RED if self.reverse else self.GRAY
             reverse_text = self.font.render("Reverse: {}".format(reverse_status), True, reverse_color)
             self.display.blit(reverse_text, (right_panel_x, right_panel_y))
-            right_panel_y += 50
+            right_panel_y += 30  # Reduced spacing to make room for lane type
+            
+            # Display current lane type above the help section
+            if self.sensor_manager and self.vehicle and self.vehicle.is_alive:
+                lane_type_int = self.sensor_manager.get_current_lane_type()
+                lane_type_str = self.sensor_manager.get_lane_type_string(lane_type_int)
+                lane_type_text = self.font.render("Lane Type: {} ({})".format(lane_type_int, lane_type_str), True, self.YELLOW)
+                self.display.blit(lane_type_text, (right_panel_x, right_panel_y))
+                right_panel_y += 30
+                
+                # Display whether there's a lane to the right
+                has_right_lane = self.sensor_manager.has_right_lane()
+                right_lane_status = "YES" if has_right_lane else "NO"
+                right_lane_color = self.GREEN if has_right_lane else self.RED
+                right_lane_text = self.font.render("Right Lane Available: {}".format(right_lane_status), True, right_lane_color)
+                self.display.blit(right_lane_text, (right_panel_x, right_panel_y))
+                right_panel_y += 30
             
             # Help section
             if self.show_help:
@@ -2196,6 +2476,7 @@ class CarlaControl:
                 # Right column of help text
                 help_texts_right = [
                     "1-5: Toggle Sensors",
+                    "6: Toggle Velocity",
                     "T: Add Traffic Vehicle",
                     "U: Add Random Traffic",
                     "Y: Remove Traffic Vehicle",
