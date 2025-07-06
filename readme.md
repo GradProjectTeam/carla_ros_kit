@@ -4,204 +4,216 @@ This project integrates CARLA simulator's sensors (LIDAR, RADAR, IMU, Camera) wi
 
 ![CARLA GUI Control Panel](Assets/Screenshot%20from%202025-06-28%2000-07-43.png)
 
+## System Architecture
+
+### Core Components
+```
+┌─────────────────┐     ┌──────────────────┐     ┌────────────────┐
+│  CARLA Server   │◄────┤  Sensor Manager  │────►│   ROS2 Nodes   │
+└─────────────────┘     └──────────────────┘     └────────────────┘
+                              │
+                        ┌─────┴─────┐
+                        │ TCP Bridge │
+                        └───────────┘
+```
+
+### Sensor Data Flow
+```
+┌──────────┐    ┌────────────┐    ┌──────────────┐    ┌───────────┐
+│ Sensors  │───►│ Data Queue │───►│ TCP Sockets  │───►│ ROS2 Msgs │
+└──────────┘    └────────────┘    └──────────────┘    └───────────┘
+   │  │  │
+   │  │  └─► Camera (RGB)
+   │  └────► RADAR (Object Detection)
+   └───────► LIDAR (Point Cloud)
+```
+
 ## Features
 
-- **Multi-Sensor Support**: LIDAR, RADAR, IMU, Camera, and Waypoint data
-- **Interactive GUI Control**: Real-time vehicle control with visual feedback
-- **Sensor Toggle System**: Enable/disable sensors on demand with keybindings
-- **Gradual Throttle Control**: Realistic acceleration and deceleration with smooth transitions
-- **Traffic Management**: Spawn and control AI traffic vehicles
-- **TCP Socket Communication**: Bridge between CARLA and ROS2
-- **Waypoint Navigation**: Generate and visualize waypoints for navigation assistance
-- **Configurable Environment**: Easily change map and weather through configuration variables
+### Sensor Suite
+- **LIDAR System**: High-precision 3D point cloud generation
+- **RADAR System**: Object detection and velocity tracking
+- **IMU Sensor**: Vehicle orientation and acceleration data
+- **Camera System**: RGB image capture with configurable resolution
+- **Waypoint Navigation**: Dynamic path planning and visualization
+
+### Vehicle Control
+- Advanced throttle management with smooth transitions
+- Precise steering control with realistic physics
+- Integrated brake system with variable force
+- Automatic gear management system
+
+### Traffic Management
+- AI-driven traffic vehicle spawning
+- Autonomous vehicle behavior control
+- Dynamic traffic density adjustment
+- Vehicle roaming mode for realistic city simulation
+
+### Environment Control
+- Dynamic weather system with multiple presets
+- Time of day manipulation
+- Multiple town maps support
+- Real-time environment modification
 
 ## Project Structure
 ```
-.
+carla_ros_kit/
 ├── CARLA/
 │   └── Sensors/
-│       ├── Gui_Control.py          # Main GUI control interface
-│       ├── Camera.py               # CARLA camera sensor
-│       ├── vehicle_control_client.py # Client for vehicle control
-│       ├── vehicle_control_server.py # Server for vehicle control
-│       └── four_sensors_with_pygame.py # Combined sensors with pygame
-├── Assets/                         # Screenshots and other assets
-├── start_radar_visualization.sh    # Script to start radar visualization
-├── debug_radar_visualization.sh    # Script to debug radar visualization
-├── .gitignore                      # Git ignore configuration
-└── readme.md                       # This file
+│       ├── Gui_Control.py          # Main control interface
+│       │   ├── CARLASetup         # CARLA environment initialization
+│       │   ├── SensorManager      # Sensor handling and data processing
+│       │   ├── TrafficManager     # AI traffic control
+│       │   └── CarlaControl       # Main GUI and vehicle control
+│       ├── Camera.py              # Camera sensor implementation
+│       └── vehicle_control.py     # Vehicle control system
+├── ROS2/
+│   └── carla_bridge/
+│       ├── sensor_nodes/          # ROS2 sensor interface nodes
+│       └── control_nodes/         # Vehicle control nodes
+├── Scripts/
+│   ├── start_visualization.sh     # Visualization startup
+│   └── debug_tools.sh            # Debugging utilities
+└── Assets/                       # Resources and documentation
 ```
 
-## Controls
+## Technical Details
 
-### Vehicle Control
-- **W/Up Arrow**: Accelerate forward (gradually increases throttle)
-- **S/Down Arrow**: Accelerate in reverse (gradually increases reverse throttle)
-- **A/Left Arrow**: Steer left
-- **D/Right Arrow**: Steer right
-- **Space**: Brake
-- **ESC**: Exit application
+### TCP Socket Configuration
+| Sensor/System | Port  | Data Format          | Update Rate |
+|--------------|-------|----------------------|-------------|
+| LIDAR        | 12349 | Point Cloud (Binary) | 10 Hz       |
+| RADAR        | 12347 | Detection Array      | 20 Hz       |
+| IMU          | 12341 | Vector3 (Float32)    | 100 Hz      |
+| Camera       | 12342 | RGB Image (JPEG)     | 30 Hz       |
+| Waypoint     | 12343 | Path Array           | 5 Hz        |
+| Control      | 12344 | Command Structure    | 50 Hz       |
 
-### Sensor Toggle Controls
-- **1**: Toggle LIDAR sensor
-- **2**: Toggle RADAR sensor
-- **3**: Toggle IMU sensor
-- **4**: Toggle Camera sensor
-- **5**: Toggle Waypoint generation
+### Control System
 
-### Traffic Management
-- **T**: Add a traffic vehicle
-- **U**: Add random traffic vehicles
-- **Y**: Remove last traffic vehicle
-- **M**: Toggle roaming mode for traffic vehicles
+#### Keyboard Controls
+- **Vehicle Operation**
+  - W/↑: Forward acceleration
+  - S/↓: Reverse
+  - A/←: Left steering
+  - D/→: Right steering
+  - SPACE: Brake
+  - R: Toggle reverse gear
+  - ESC: Exit application
 
-### UI Controls
-- **H**: Toggle help display
+- **Sensor Management**
+  - 1: LIDAR toggle
+  - 2: RADAR toggle
+  - 3: IMU toggle
+  - 4: Camera toggle
+  - 5: Waypoint toggle
+  - 6: Velocity data toggle
 
-## Advanced Features
+- **Traffic Control**
+  - T: Spawn single vehicle
+  - U: Add random vehicles
+  - Y: Remove last vehicle
+  - M: Toggle roaming mode
 
-### Configurable Environment
-The simulation environment can be easily configured by changing variables at the top of the `Gui_Control.py` file:
+- **Interface**
+  - H: Help display toggle
 
-#### Map Selection
+### Configuration Parameters
+
+#### Environment Settings
 ```python
-# Available options: 'Town01' to 'Town07', 'Town10HD', 'Town11', 'Town12'
-TOWN_MAP = 'Town04'  # Set this to change the map
+# Map Selection
+TOWN_MAP = 'Town04'  # Options: Town01-07, Town10HD, Town11, Town12
+
+# Weather Configuration
+WEATHER_PRESET = 'ClearNoon'  # Options: ClearNoon, CloudyNoon, WetNoon, etc.
+
+# Sensor Configuration
+LIDAR_POINTS = 100000  # Points per second
+RADAR_RANGE = 100.0    # Detection range in meters
+CAMERA_RES = (800, 600)  # Resolution in pixels
 ```
 
-#### Weather Presets
-```python
-# Available options include:
-# - Noon conditions: 'ClearNoon', 'CloudyNoon', 'WetNoon', 'WetCloudyNoon', etc.
-# - Sunset conditions: 'ClearSunset', 'CloudySunset', 'WetSunset', etc.
-WEATHER_PRESET = 'ClearNoon'  # Set this to change the weather
-```
+## Installation Guide
 
-### Gradual Throttle Control
-The vehicle features realistic acceleration and deceleration:
-- Throttle gradually increases while acceleration key is held
-- Throttle gradually decreases when acceleration key is released
-- When changing direction (forward to reverse or vice versa), the vehicle first decelerates to a stop before accelerating in the new direction
-
-### Sensor Management
-Each sensor can be toggled independently:
-- When toggled on, the sensor is created and data transmission begins
-- When toggled off, the sensor is destroyed and data transmission stops
-- TCP sockets are created and managed automatically
-
-### Traffic Vehicle System
-The system can spawn and manage AI-controlled traffic vehicles:
-- Traffic vehicles use CARLA's autopilot system
-- Vehicles can be set to roam freely or follow specific paths
-- Traffic density can be adjusted by adding or removing vehicles
-
-## Prerequisites
-
-### CARLA Environment
-- CARLA 0.9.12
+### Prerequisites
+- CARLA 0.9.12+
 - Python 3.7+
-- numpy
-- pygame
-- socket
-
-### ROS2 Environment
 - ROS2 Rolling/Humble
-- Python 3.8+
-- numpy
-- sensor_msgs
-- rclpy
+- Required Python packages:
+  ```
+  numpy>=1.19.0
+  pygame>=2.0.0
+  rclpy>=1.0.0
+  sensor_msgs>=2.0.0
+  ```
 
-## Installation
+### Setup Steps
 
-1. Setup CARLA:
-```bash
-# Extract CARLA if not already done
-cd CARLA
-tar -xf CARLA_0.9.12.tar.gz
+1. **CARLA Installation**:
+   ```bash
+   # Extract CARLA
+   tar -xf CARLA_0.9.12.tar.gz
+   
+   # Set Python path
+   export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
+   ```
 
-# Add CARLA Python API to PYTHONPATH
-export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
-```
+2. **ROS2 Workspace Setup**:
+   ```bash
+   # Create workspace
+   mkdir -p ~/carla_ws/src
+   cd ~/carla_ws/src
+   
+   # Clone repository
+   git clone https://github.com/your-repo/carla_ros_kit.git
+   
+   # Build workspace
+   cd ~/carla_ws
+   colcon build
+   ```
 
-2. Run the GUI Control Interface:
-```bash
-# Set Python path for CARLA
-export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
+## Usage Instructions
 
-# Run GUI Control script
-cd CARLA/Sensors
-python3.7 Gui_Control.py
-```
+1. **Start CARLA Server**:
+   ```bash
+   ./CarlaUE4.sh
+   ```
 
-## Usage
+2. **Launch Sensor Interface**:
+   ```bash
+   python3 CARLA/Sensors/Gui_Control.py
+   ```
 
-1. Start CARLA (Terminal 1):
-```bash
-cd CARLA/CARLA_0.9.12
-./CarlaUE4.sh
-```
+3. **Run ROS2 Bridge**:
+   ```bash
+   ros2 launch carla_bridge sensor_bridge.launch.py
+   ```
 
-2. Start GUI Control Interface (Terminal 2):
-```bash
-# Set Python path for CARLA
-export PYTHONPATH=$PYTHONPATH:$PWD/CARLA/PythonAPI/carla/dist/carla-0.9.12-py3.7-linux-x86_64.egg
+## Troubleshooting Guide
 
-# Run GUI Control script
-cd CARLA/Sensors
-python3.7 Gui_Control.py
-```
+### Common Issues and Solutions
 
-### Changing Maps and Weather
-
-To change the simulation environment:
-
-1. Open `Gui_Control.py` in a text editor
-2. Find the configuration variables at the top of the file
-3. Change `TOWN_MAP` to select a different map (e.g., 'Town01', 'Town04', 'Town10HD')
-4. Change `WEATHER_PRESET` to select different weather conditions (e.g., 'ClearNoon', 'RainyNoon', 'CloudySunset')
-5. Save the file and run the script
-
-The system will automatically load your selected map and apply the weather preset when started.
-
-## TCP Socket Communication
-
-The system uses TCP sockets to bridge between CARLA and ROS2:
-
-| Sensor  | Port  |
-|---------|-------|
-| LIDAR   | 12349 |
-| RADAR   | 12347 |
-| IMU     | 12341 |
-| Camera  | 12342 |
-| Waypoint| 12343 |
-| Control | 12344 |
-
-## Troubleshooting
-
-### Common Issues
-1. **"ImportError: No module named 'carla'"**:
-   - Check PYTHONPATH setting
-   - Verify carla egg file location
-   - Ensure using compatible Python version
-
-2. **"Connection refused"**:
-   - Ensure CARLA script is running
+1. **Sensor Connection Failures**
    - Check port availability
-   - Verify network settings
+   - Verify CARLA server status
+   - Confirm Python path settings
 
-3. **"No sensors visible"**:
-   - Verify sensor is toggled ON in GUI
-   - Check TCP connection
-   - Confirm port settings
+2. **Performance Issues**
+   - Reduce sensor update rates
+   - Lower LIDAR point count
+   - Adjust camera resolution
 
-4. **"Map or weather not changing"**:
-   - Verify you've edited the correct configuration variables
-   - Check for typos in map or weather preset names
-   - Ensure CARLA has the requested map installed
+3. **Vehicle Control Problems**
+   - Verify keyboard input settings
+   - Check control server connection
+   - Confirm physics settings
 
-## Authors
-- Shishtawy
-- Hendy
+## Development Team
+
+### Project Leads
+- Shishtawy ([shishtawylearning@gmail.com](mailto:shishtawylearning@gmail.com))
+- Hendy ([mustafahendy@outlook.com](mailto:mustafahendy@outlook.com))
 
 ## Project by:
 TechZ
