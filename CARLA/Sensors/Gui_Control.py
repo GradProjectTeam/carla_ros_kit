@@ -644,7 +644,7 @@ class SensorManager:  # Class managing all vehicle sensors and their data proces
                 'z': local_z,  # Vertical distance in vehicle frame
                 'road_id': wp.road_id,  # Current road identifier
                 'lane_id': wp.lane_id,  # Current lane identifier
-                'lane_type': int(wp.lane_type),  # Type of current lane
+                'lane_type': self.get_lane_type_string(wp.lane_type),  # Type of current lane as string
                 'has_right_lane': has_right_lane  # Whether lane change right is possible
             }
             
@@ -690,15 +690,20 @@ class SensorManager:  # Class managing all vehicle sensors and their data proces
                             batch_data = bytearray()
                             for waypoint in waypoints:
                                 # Pack waypoint data: position, road info, and lane info
-                                point_data = struct.pack('!fffiiii', 
+                                # Convert lane_type string to bytes with fixed length (20 bytes)
+                                lane_type_str = waypoint['lane_type'].encode('utf-8')
+                                lane_type_bytes = lane_type_str.ljust(20, b'\0')
+                                
+                                # Pack position and road info
+                                position_data = struct.pack('!fffiis20i', 
                                                        waypoint['x'],  # Forward distance
                                                        waypoint['y'],  # Lateral distance
                                                        waypoint['z'],  # Vertical distance
                                                        waypoint['road_id'],  # Road identifier
                                                        waypoint['lane_id'],  # Lane identifier
-                                                       waypoint['lane_type'],  # Lane type
+                                                       lane_type_bytes,  # Lane type as string (20 bytes)
                                                        waypoint['has_right_lane'])  # Lane change possibility
-                                batch_data.extend(point_data)  # Add to batch buffer
+                                batch_data.extend(position_data)  # Add to batch buffer
                             
                             self.waypoint_socket.sendall(batch_data)  # Send complete waypoint batch
                             
@@ -1366,6 +1371,25 @@ class SensorManager:  # Class managing all vehicle sensors and their data proces
             print("Error checking right lane: {}".format(e))
             traceback.print_exc()
             return False
+
+    def get_lane_type_string(self, lane_type):
+        """Convert lane type enum to string representation"""
+        # Map lane types to human-readable strings
+        lane_type_mapping = {
+            carla.LaneType.NONE: "None",
+            carla.LaneType.Driving: "Driving",
+            carla.LaneType.Stop: "Stop",
+            carla.LaneType.Shoulder: "Shoulder",
+            carla.LaneType.Bidirectional: "Bidirectional",
+            carla.LaneType.Parking: "Parking",
+            carla.LaneType.Restricted: "Restricted",
+            carla.LaneType.Border: "Border",
+            carla.LaneType.Sidewalk: "Sidewalk",
+            carla.LaneType.Biking: "Biking",
+            carla.LaneType.Tram: "Tram",
+            carla.LaneType.Rail: "Rail"
+        }
+        return lane_type_mapping.get(lane_type, "Unknown")
 
 class TrafficManager:
     def __init__(self, world, ego_vehicle, client):
